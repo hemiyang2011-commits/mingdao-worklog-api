@@ -54,11 +54,66 @@ function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
 function Test-Python {
     try { $v = & python --version 2>&1; if ($LASTEXITCODE -eq 0) { return "python" } } catch {}
     try { $v = & py -3 --version 2>&1; if ($LASTEXITCODE -eq 0) { return "py -3"   } } catch {}
+    # 兜底：uv 提供 `uv run python` 解释器能力，无需全局 Python
+    try { $v = & uv run python --version 2>&1; if ($LASTEXITCODE -eq 0) { return "uv run python" } } catch {}
     return $null
 }
 function Test-Git {
     try { $v = & git --version 2>&1; if ($LASTEXITCODE -eq 0) { return $true } } catch {}
     return $false
+}
+
+# 自动装 Python（或 uv）。所有步骤都无管理员权限、用户态安装。
+# 优先级：winget > uv（Astral，单 exe ~13MB）> 引导到 python.org
+function Install-Python {
+    Write-Warn "未检测到 Python。正在尝试自动安装（无需管理员权限）..."
+
+    # 1. 优先 winget（Windows 10 1809+ / Server 2019+ 自带）
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "  → 尝试 winget install Python.Python.3.12 ..." -ForegroundColor Yellow
+        & winget install --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --scope user
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "winget 安装完成，重新检测..."
+            Start-Sleep -Seconds 2
+            $r = Test-Python
+            if ($r) { return $r }
+        } else {
+            Write-Warn "winget 失败（exit=$LASTEXITCODE），fallback 到 uv"
+        }
+    } else {
+        Write-Host "  → winget 不在（需 Windows 10 1809+ 且 App Installer），fallback 到 uv" -ForegroundColor Yellow
+    }
+
+    # 2. 兜底：uv（Astral 出品，单 exe，~13MB，跨平台一致）
+    Write-Host "  → 尝试安装 uv（https://astral.sh/uv）..." -ForegroundColor Yellow
+    $tmp = [System.IO.Path]::GetTempFileName() + ".ps1"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        (New-Object System.Net.WebClient).DownloadString('https://astral.sh/uv/install.ps1') | Out-File -FilePath $tmp -Encoding UTF8
+        & powershell -ExecutionPolicy Bypass -File $tmp
+        if ($LASTEXITCODE -eq 0) {
+            # uv 装到 ~/.local/bin/uv，要刷新 PATH
+            $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+            [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "User")
+            Start-Sleep -Seconds 1
+            $r = Test-Python
+            if ($r) { return $r }
+        } else {
+            Write-Warn "uv 安装失败"
+        }
+    } catch {
+        Write-Warn "uv 下载/执行异常：$_"
+    } finally {
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+    }
+
+    # 3. 全失败：明确报错 + 引导
+    Write-Err "无法自动装上 Python。请手动装一项后重跑："
+    Write-Host "    方案 A（推荐）：运行以下一行装 uv（~13MB，跨平台）" -ForegroundColor Yellow
+    Write-Host "      irm https://astral.sh/uv/install.ps1 | iex" -ForegroundColor Yellow
+    Write-Host "    方案 B：从 https://www.python.org/downloads/ 下载 Python 3.10+ 安装" -ForegroundColor Yellow
+    return $null
 }
 
 function Read-Secret([string]$prompt) {
@@ -96,9 +151,9 @@ $stepIdx++
 Write-Step $stepIdx "检测 Python / Git"
 $python = Test-Python
 if (-not $python) {
-    Write-Err "未检测到 python。请先安装 Python 3.8+（https://python.org）"
-    exit 1
+    $python = Install-Python
 }
+if (-not $python) { exit 1 }
 Write-OK "Python: $python"
 if (-not (Test-Git)) {
     Write-Warn "未检测到 git。若 LocalSource 为空且目标目录不存在会失败。可安装 git for windows 或用 -LocalSource。"

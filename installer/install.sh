@@ -66,6 +66,69 @@ detect_python() {
             fi
         fi
     done
+    # 兜底：uv 提供 `uv run python`，无需全局 Python
+    if command -v uv >/dev/null 2>&1; then
+        if uv run python -c 'import sys; print(sys.version_info.major, sys.version_info.minor)' >/dev/null 2>&1; then
+            PY="uv run python"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# 自动装 Python（或 uv）。按平台分发：brew / apt / yum / apk / pacman / uv
+ensure_python() {
+    warn "未检测到 Python。正在尝试自动安装..."
+
+    case "$(uname -s 2>/dev/null || echo Unknown)" in
+        Darwin)
+            # macOS：先试 brew，fallback uv
+            if command -v brew >/dev/null 2>&1; then
+                printf '  → brew install python3 ...\n'
+                brew install python3 && return 0 || warn "brew install 失败，fallback uv"
+            fi
+            printf '  → 安装 uv（https://astral.sh/uv）...\n'
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$PATH"
+            if command -v uv >/dev/null 2>&1; then
+                PY="uv run python"; return 0
+            fi
+            ;;
+        Linux)
+            # Linux：先试 uv（统一跨发行版，~13MB），再试系统包管理器
+            printf '  → 安装 uv（https://astral.sh/uv，跨发行版）...\n'
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$PATH"
+            if command -v uv >/dev/null 2>&1; then
+                PY="uv run python"; return 0
+            fi
+            if command -v apt >/dev/null 2>&1; then
+                printf '  → fallback: apt install python3 ...\n'
+                (sudo -n apt update && sudo -n apt install -y python3) >/dev/null 2>&1 && return 0
+            fi
+            if command -v yum >/dev/null 2>&1; then
+                printf '  → fallback: yum install python3 ...\n'
+                (sudo -n yum install -y python3) >/dev/null 2>&1 && return 0
+            fi
+            if command -v apk >/dev/null 2>&1; then
+                printf '  → fallback: apk add python3 ...\n'
+                (sudo -n apk add python3) >/dev/null 2>&1 && return 0
+            fi
+            if command -v pacman >/dev/null 2>&1; then
+                printf '  → fallback: pacman -S python ...\n'
+                (sudo -n pacman -S --noconfirm python) >/dev/null 2>&1 && return 0
+            fi
+            ;;
+        *)
+            warn "未知平台：$(uname -s 2>/dev/null)"
+            ;;
+    esac
+
+    err "无法自动装上 Python。请手动装一项后重跑："
+    printf '  方案 A（推荐）：运行以下一行装 uv（~13MB，跨平台）\n' >&2
+    printf '    curl -LsSf https://astral.sh/uv/install.sh | sh\n' >&2
+    printf '  方案 B：brew install python3（macOS）\n' >&2
+    printf '  方案 C：apt install python3（Debian/Ubuntu）\n' >&2
     return 1
 }
 
@@ -77,10 +140,15 @@ TOTAL_STEPS=8
 # ============== 1. 工具检测 ==============
 step 1 "$TOTAL_STEPS" "检测 python / git"
 if ! detect_python; then
-    err "未检测到 python3，请先安装（brew install python 或 apt install python3）"
-    exit 1
+    if ! ensure_python || ! detect_python; then
+        exit 1
+    fi
 fi
-ok "Python: $PY ($($PY --version))"
+if [[ "$PY" == "uv run python" ]]; then
+    ok "Python: $PY ($($PY --version 2>&1))  [via uv]"
+else
+    ok "Python: $PY ($($PY --version))"
+fi
 if ! command -v git >/dev/null 2>&1; then
     warn "未检测到 git，若 LocalSource 为空且目标不存在会失败"
 else

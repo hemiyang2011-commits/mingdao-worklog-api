@@ -18,11 +18,69 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 SKILL_NAME = "mingdao-worklog-api"
+
+
+def _python_bin() -> str:
+    """Return the python interpreter to use for invoking worklog_api.py.
+
+    Order:
+    1. sys.executable (the interpreter running THIS hook — should be present since
+       the hook itself is Python, but may not match config.json's expectations
+       on the user's machine).
+    2. python3 / python on PATH.
+    3. `uv run python` (Astral's uv, recommended fallback — single ~13MB exe,
+       works without a global Python install).
+
+    Returned string is suitable as argv[0] for subprocess.run.
+    """
+    # If our own interpreter works, prefer it.
+    if sys.executable and Path(sys.executable).is_file():
+        try:
+            # basic sanity: can it import a stdlib module?
+            subprocess.run(
+                [sys.executable, "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            return sys.executable
+        except Exception:
+            pass
+    for cand in ("python3", "python", "py"):
+        if not shutil.which(cand):
+            continue
+        try:
+            subprocess.run(
+                [cand, "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            return cand
+        except Exception:
+            continue
+    # uv fallback
+    if shutil.which("uv"):
+        # verify uv itself works
+        try:
+            r = subprocess.run(
+                ["uv", "run", "python", "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            if r.returncode == 0:
+                return "uv run python"
+        except Exception:
+            pass
+    # nothing worked — let caller fail with a clear message
+    return ""
 
 
 def _detect_skill_dir() -> Path | None:
@@ -101,8 +159,19 @@ def parse_message(text: str) -> dict:
 
 def run_skill(skill_dir: Path, parsed: dict, dry: bool = False) -> tuple[bool, str]:
     """Invoke worklog_api.py add-row with parsed fields. Return (ok, message)."""
-    cmd = [
-        sys.executable,
+    py = _python_bin()
+    if not py:
+        return False, (
+            "未找到 Python 解释器。请装 Python 3.8+ 或 uv：\n"
+            "  macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+            "  Windows:     irm https://astral.sh/uv/install.ps1 | iex"
+        )
+    # py is something like "uv run python" (multi-token) — handle by splitting
+    if " " in py:
+        py_argv = py.split()
+    else:
+        py_argv = [py]
+    cmd = py_argv + [
         str(skill_dir / "scripts" / "worklog_api.py"),
         "--config",
         str(skill_dir / "config.json"),

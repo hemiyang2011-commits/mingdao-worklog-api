@@ -8,6 +8,40 @@
 
 ---
 
+## ⚙️ 前置条件
+
+> 安装脚本会自动检测并安装缺失依赖，**正常情况下你什么都不用装**。只有离线/受限环境才需要手动装。
+
+| 依赖 | 最低版本 | 作用 | 装法 |
+|---|---|---|---|
+| **Python** | 3.8+ | 跑 `worklog_api.py` + `commit-msg` hook | 安装脚本自动装；离线时见下表 |
+| **Git** | 任意 | 拉源 + commit-msg hook | Windows 装 [Git for Windows](https://git-scm.com) |
+| **明道云 appKey + secretKey** | — | 调 API 用 | 在「明道云 → 应用 → 应用授权」获取 |
+
+### 手动装 Python（仅当自动装失败时）
+
+**推荐用 `uv`**（Astral 出品，~13MB 单 exe，跨平台一致，装好后 5 秒内可用）：
+
+| 平台 | 一行命令 |
+|---|---|
+| **Windows** | `irm https://astral.sh/uv/install.ps1 \| iex` |
+| **macOS** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| **Linux** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+
+装完后 `uv run python --version` 验证；之后 hook / install 脚本会自动用 `uv run` 跑 Python 脚本。
+
+**或者装完整 Python**：
+
+| 平台 | 装法 |
+|---|---|
+| Windows | `winget install Python.Python.3.12` 或从 [python.org](https://www.python.org/downloads/) 下载 |
+| macOS | `brew install python3` |
+| Ubuntu / Debian | `sudo apt install python3` |
+| CentOS / RHEL | `sudo yum install python3` |
+| Arch | `sudo pacman -S python` |
+
+---
+
 ## ✨ 核心特性
 
 - **一行命令安装到任何 agent 工具**：Claude Code / Codex / OpenCode / ZCode / Antigravity 全部支持
