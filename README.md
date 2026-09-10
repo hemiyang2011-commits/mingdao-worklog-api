@@ -1,6 +1,6 @@
 # mingdao-worklog-api
 
-> 在任意 agent 工具（Claude Code / OpenAI Codex / OpenCode / ZCode / Google Antigravity）里说一句"帮我写条工作日志"，自动写入你的明道云工作日志表。
+> 在任意 agent 工具（WorkBuddy / Claude Code / OpenAI Codex / OpenCode / ZCode / Google Antigravity）里说一句"帮我写条工作日志"，自动写入你的明道云工作日志表。
 
 本仓库封装了一份**直接调用明道云开放 API** 的 skill，**不依赖 `hap` CLI 登录**，也不要求登录明道云网页。
 
@@ -44,7 +44,7 @@
 
 ## ✨ 核心特性
 
-- **一行命令安装到任何 agent 工具**：Claude Code / Codex / OpenCode / ZCode / Antigravity 全部支持
+- **一行命令安装到任何 agent 工具**：WorkBuddy / Claude Code / Codex / OpenCode / ZCode / Antigravity 全部支持
 - **AGENTS.md 声明方式触发**：agent 启动时读 SKILL.md 描述，判断该不该调
 - **可选 commit-msg hook**：`git commit -m "fix #log 项目:资产OA #time=2h"` 自动写工作日志
 - **老板本/员工本共享一份源**：通过 junction / symlink 链接，凭证只填一次
@@ -104,7 +104,7 @@ irm .../install.ps1 | iex
 | 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（如 杨浪，可回车跳过） |
 | 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
 | 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
-| 5 | 在 5 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
+| 5 | 在 6 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
 | 6 | 写入 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.agents/AGENTS.md` 三份声明（追加在已有内容尾部） |
 | 7 | 询问是否安装 git `commit-msg` hook（默认 Y） |
 | 8 | 跑 `test-auth` 验证链路通 |
@@ -169,6 +169,79 @@ git commit -m "docs: README排版 #log #time=1h [skip-worklog]"
 # 或
 git commit --no-verify -m "重构"
 ```
+
+---
+
+## 🤖 各 agent 工具适配
+
+安装脚本会探测式地把 skill 链接到下面 6 个目录（**只链接本机已存在的工具目录**，不会为没装的工具凭空创建）：
+
+| 工具 | 链接目标目录（Windows 等同） | skill 来源 |
+|---|---|---|
+| **WorkBuddy** | `%USERPROFILE%\.workbuddy\skills\mingdao-worklog-api\` | 直接装在此目录，WorkBuddy 默认扫描 |
+| **Claude Code** | `%USERPROFILE%\.claude\skills\mingdao-worklog-api\` | [Claude Code skills 文档](https://docs.claude.com/en/docs/claude-code/skills) |
+| **OpenAI Codex** | `%USERPROFILE%\.codex\skills\mingdao-worklog-api\` | [Codex CLI skills 文档](https://github.com/openai/codex) |
+| **OpenCode** | `%USERPROFILE%\.config\opencode\skills\mingdao-worklog-api\` | [OpenCode skills 文档](https://opencode.ai/docs/skills) |
+| **ZCode（智谱）** | `%USERPROFILE%\.zcode\skills\mingdao-worklog-api\` | [ZCode Skill 文档](https://zcode.z.ai/docs/skill) |
+| **Google Antigravity** | `%USERPROFILE%\.gemini\config\skills\mingdao-worklog-api\` | [Antigravity Skills 文档](https://antigravity.google/docs/skills) |
+
+> macOS / Linux 把 `%USERPROFILE%` 换成 `~` 即可（路径都是 `~/.xxx/skills/...`）。
+> Antigravity 同时也认 `.agents/skills/`，本脚本已经包含这个目录作为兜底。
+
+### 在每个工具里的实际用法
+
+#### WorkBuddy
+直接在对话里说：
+> "帮我写条工作日志：资产OA 系统 开发 2 小时"
+
+WorkBuddy 启动时会扫描 `~/.workbuddy/skills/`，看到 SKILL.md 里的 description 就会自动调用。
+
+#### Claude Code
+在 Claude Code 里说话触发（agent 读 `~/.claude/skills/mingdao-worklog-api/SKILL.md`）：
+```
+@mingdao-worklog-api 帮我写条工作日志
+```
+或直接：
+> "帮我写条工作日志：资产OA 系统 2 小时"
+
+启动新会话时 Claude Code 也会读 `~/.claude/CLAUDE.md`，里面有这段声明后会主动问"要不要写条日志"。
+
+#### OpenAI Codex
+Codex CLI 启动时会读 `~/.codex/AGENTS.md` 里的声明（install 脚本已写入）。直接对话触发：
+> "Add a worklog row for me: project 资产OA, 2 hours"
+
+或在提示里 mention skill：`/mingdao-worklog-api 写一条今天的日志`。
+
+#### OpenCode
+OpenCode 启动时会扫描 `~/.config/opencode/skills/`（同时兼容 `~/.claude/skills/` 和 `~/.agents/skills/`，所以即使你装的不是 OpenCode 的 symlink 也能找到）。
+```
+> /mingdao-worklog-api 写一条工作日志
+```
+或在聊天里 mention：`use skill mingdao-worklog-api to log today's work`。
+
+#### ZCode（智谱）
+打开 ZCode → 设置 → 技能，确认「mingdao-worklog-api」出现在列表里并**启用**。
+然后在聊天里输入 `$mingdao-worklog-api` 加你的需求：
+```
+$mingdao-worklog-api 帮我写条日志，2 小时，项目是资产OA 系统
+```
+或者用 ZCode 的导入功能从 Claude Code / Codex CLI 目录一键导入（无需手动软链）。
+
+#### Google Antigravity
+Antigravity 启动时扫描 `~/.gemini/config/skills/`（也认 `~/.agents/skills/`）。直接对话：
+> "Use the mingdao-worklog-api skill to log today's work: 2 hours on 资产OA"
+
+Antigravity CLI（`agy`）的话会把它转成 slash command `/mingdao-worklog-api`：
+```
+> /mingdao-worklog-api 写一条今天的日志
+```
+
+### 验证 skill 是否被识别
+
+跑完 install 后，到对应工具的设置 / skills 列表里看有没有「mingdao-worklog-api」。如果没有：
+1. 确认链接目录里能看到 `SKILL.md`：`ls ~/.workbuddy/skills/mingdao-worklog-api/SKILL.md`
+2. 确认 frontmatter 含 `name: mingdao-worklog-api` 和 `description:` 字段
+4. 重启 agent 工具（部分工具只在启动时扫一次）
 
 ---
 

@@ -242,11 +242,12 @@ if ((Test-Path $configPath) -and -not $ForceConfig) {
 $stepIdx++
 Write-Step $stepIdx "创建 agent 工具 junction"
 $links = @(
-    @{ Path = "$H\.claude\skills";        Tool = "Claude Code"   },
-    @{ Path = "$H\.codex\skills";         Tool = "OpenAI Codex"  },
-    @{ Path = "$H\.agents\skills";        Tool = "通用（OpenCode/ZCode/Antigravity）" },
-    @{ Path = "$H\.config\opencode\skills"; Tool = "OpenCode 专用" },
-    @{ Path = "$H\.gemini\config\skills"; Tool = "Google Antigravity 专用" }
+    @{ Path = "$H\.claude\skills";        Tool = "Claude Code"        },
+    @{ Path = "$H\.codex\skills";         Tool = "OpenAI Codex"       },
+    @{ Path = "$H\.agents\skills";        Tool = "通用（Antigravity / 其他兼容 agent）" },
+    @{ Path = "$H\.config\opencode\skills"; Tool = "OpenCode"          },
+    @{ Path = "$H\.zcode\skills";         Tool = "ZCode（智谱）"        },
+    @{ Path = "$H\.gemini\config\skills"; Tool = "Google Antigravity"  }
 )
 foreach ($l in $links) {
     $parent = $l.Path

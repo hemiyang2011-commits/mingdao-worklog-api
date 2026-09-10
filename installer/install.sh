@@ -233,9 +233,10 @@ step 5 "$TOTAL_STEPS" "创建 agent 工具 symlink"
 declare -A LINKS=(
     ["$HOME/.claude/skills/mingdao-worklog-api"]="Claude Code"
     ["$HOME/.codex/skills/mingdao-worklog-api"]="OpenAI Codex"
-    ["$HOME/.agents/skills/mingdao-worklog-api"]="通用（OpenCode/ZCode/Antigravity）"
-    ["$HOME/.config/opencode/skills/mingdao-worklog-api"]="OpenCode 专用"
-    ["$HOME/.gemini/config/skills/mingdao-worklog-api"]="Antigravity 专用"
+    ["$HOME/.agents/skills/mingdao-worklog-api"]="通用（Antigravity / 其他兼容 agent）"
+    ["$HOME/.config/opencode/skills/mingdao-worklog-api"]="OpenCode"
+    ["$HOME/.zcode/skills/mingdao-worklog-api"]="ZCode（智谱）"
+    ["$HOME/.gemini/config/skills/mingdao-worklog-api"]="Google Antigravity"
 )
 for link in "${!LINKS[@]}"; do
     parent="$(dirname "$link")"
