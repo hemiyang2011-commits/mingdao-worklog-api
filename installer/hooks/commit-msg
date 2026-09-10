@@ -1,1 +1,256 @@
-@installer/hooks/commit-msg
+#!/usr/bin/env python3
+"""mingdao-worklog-api git commit-msg hook.
+
+Trigger: commit message contains #log / #time=Nh / 项目:XXX tag.
+Behavior: invoke worklog_api.py add-row with parsed fields.
+Skip: [skip-worklog] in message OR git commit --no-verify was used.
+
+Cross-platform (Windows + macOS + Linux). Read by git itself when core.hooksPath
+points at the directory containing this file.
+
+Install:
+    installer puts this file at ~/.git_hooks/commit-msg (default). Run:
+        git config --global core.hooksPath "<dir>"
+    To enable per-repo only, copy to <repo>/.git/hooks/commit-msg (git uses this
+    automatically if core.hooksPath is unset).
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+SKILL_NAME = "mingdao-worklog-api"
+
+
+def _python_bin() -> str:
+    """Return the python interpreter to use for invoking worklog_api.py.
+
+    Order:
+    1. sys.executable (the interpreter running THIS hook — should be present since
+       the hook itself is Python, but may not match config.json's expectations
+       on the user's machine).
+    2. python3 / python on PATH.
+    3. `uv run python` (Astral's uv, recommended fallback — single ~13MB exe,
+       works without a global Python install).
+
+    Returned string is suitable as argv[0] for subprocess.run.
+    """
+    # If our own interpreter works, prefer it.
+    if sys.executable and Path(sys.executable).is_file():
+        try:
+            # basic sanity: can it import a stdlib module?
+            subprocess.run(
+                [sys.executable, "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            return sys.executable
+        except Exception:
+            pass
+    for cand in ("python3", "python", "py"):
+        if not shutil.which(cand):
+            continue
+        try:
+            subprocess.run(
+                [cand, "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            return cand
+        except Exception:
+            continue
+    # uv fallback
+    if shutil.which("uv"):
+        # verify uv itself works
+        try:
+            r = subprocess.run(
+                ["uv", "run", "python", "-c", "import json"],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            if r.returncode == 0:
+                return "uv run python"
+        except Exception:
+            pass
+    # nothing worked — let caller fail with a clear message
+    return ""
+
+
+def _detect_skill_dir() -> Path | None:
+    """Return the on-disk skill directory (real path, not a junction).
+
+    Search by SKILL.md signature (name field).
+    """
+    candidates = []
+    home = Path.home()
+    candidates += [
+        home / ".workbuddy" / "skills" / SKILL_NAME,
+    ]
+    # also check common agent tool skill roots (may be junctions pointing at the above)
+    for sub in ("claude", "codex", "agents"):
+        candidates += [
+            home / f".{sub}" / "skills" / SKILL_NAME,
+            home / f".{sub}" / "config" / "skills" / SKILL_NAME,
+            home / ".config" / sub / "skills" / SKILL_NAME,
+        ]
+    candidates += [home / ".gemini" / "config" / "skills" / SKILL_NAME]
+
+    seen = set()
+    for c in candidates:
+        try:
+            real = c.resolve()
+        except OSError:
+            continue
+        if real in seen:
+            continue
+        seen.add(real)
+        skill_md = real / "SKILL.md"
+        if skill_md.is_file() and skill_md.read_text(encoding="utf-8").startswith(
+            f"---\nname: {SKILL_NAME}\n"
+        ):
+            return real
+    return None
+
+
+_TAG_LOG = re.compile(r"#log\b", re.IGNORECASE)
+_TAG_TIME_MIN = re.compile(r"#?time\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*h?", re.IGNORECASE)
+_TAG_TIME_CN = re.compile(r"工时\s*[::]\s*([0-9]+(?:\.[0-9]+)?)\s*(?:小时|h|H)?", re.IGNORECASE)
+_TAG_PROJECT = re.compile(r"项目\s*[::]\s*([^\s#]+(?:\s+[^\s#]+)*?)(?=\s+#|\s*$)")
+_TAG_SKIP = re.compile(r"\[skip-worklog\]", re.IGNORECASE)
+
+
+def parse_message(text: str) -> dict:
+    """Extract worklog trigger fields from commit message."""
+    out: dict = {"triggered": False, "skip": False}
+    if _TAG_SKIP.search(text):
+        out["skip"] = True
+    if not _TAG_LOG.search(text):
+        return out
+    out["triggered"] = True
+
+    m = _TAG_TIME_MIN.search(text) or _TAG_TIME_CN.search(text)
+    if m:
+        out["hours"] = float(m.group(1))
+    m = _TAG_PROJECT.search(text)
+    if m:
+        out["project"] = m.group(1).strip().rstrip(",.;: ")
+    # Content = first line with tags stripped
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if lines:
+        content = lines[0]
+        # strip known tags
+        content = _TAG_LOG.sub("", content)
+        content = _TAG_TIME_MIN.sub("", content)
+        content = _TAG_TIME_CN.sub("", content)
+        content = _TAG_PROJECT.sub("", content)
+        content = _TAG_SKIP.sub("", content)
+        content = re.sub(r"\s{2,}", " ", content).strip(" ,;:-")
+        if content:
+            out["content"] = content
+    return out
+
+
+def run_skill(skill_dir: Path, parsed: dict, dry: bool = False) -> tuple[bool, str]:
+    """Invoke worklog_api.py add-row with parsed fields. Return (ok, message)."""
+    py = _python_bin()
+    if not py:
+        return False, (
+            "未找到 Python 解释器。请装 Python 3.8+ 或 uv：\n"
+            "  macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+            "  Windows:     irm https://astral.sh/uv/install.ps1 | iex"
+        )
+    # py is something like "uv run python" (multi-token) — handle by splitting
+    if " " in py:
+        py_argv = py.split()
+    else:
+        py_argv = [py]
+    cmd = py_argv + [
+        str(skill_dir / "scripts" / "worklog_api.py"),
+        "--config",
+        str(skill_dir / "config.json"),
+        "add-row",
+    ]
+    cmd += ["--project-name", parsed["project"]] if "project" in parsed else []
+    cmd += ["--hours", str(parsed["hours"])] if "hours" in parsed else []
+    cmd += ["--content", parsed["content"]] if "content" in parsed else []
+    if dry:
+        cmd.append("--dry-run")
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError as e:
+        return False, f"worklog_api.py 不可执行: {e}"
+    msg = (result.stdout or "") + (result.stderr or "")
+    return result.returncode == 0, msg.strip()
+
+
+def log(msg: str) -> None:
+    print(f"[worklog-hook] {msg}", file=sys.stderr)
+
+
+def main() -> int:
+    # commit-msg 钩子的标准约定是 argv[1] = 消息文件路径；git 并不会把
+    # COMMIT_EDITMSG 导出为环境变量（仅部分流程可用），只读它会静默空转。
+    editmsg_path = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not editmsg_path:
+        editmsg_path = os.environ.get("COMMIT_EDITMSG", "")
+    if not editmsg_path or not Path(editmsg_path).is_file():
+        # not invoked by git, ignore
+        return 0
+    msg_text = Path(editmsg_path).read_text(encoding="utf-8", errors="replace")
+    parsed = parse_message(msg_text)
+    if not parsed["triggered"]:
+        return 0  # silent
+    if parsed["skip"]:
+        log("检测到 [skip-worklog] tag，跳过写入。commit 继续。")
+        return 0
+    if "hours" not in parsed:
+        log(f"检测到 #log 但缺少 #time=Nh，commit message: {msg_text.splitlines()[0][:80]}")
+        log("跳过工作日志。commit 继续。")
+        return 0
+    if "project" not in parsed:
+        log("检测到 #log 但缺少 项目:XXX，commit message 应包含项目名。")
+        log("跳过工作日志。commit 继续。")
+        return 0
+
+    skill_dir = _detect_skill_dir()
+    if skill_dir is None:
+        log("⚠️ 找不到 mingdao-worklog-api skill 目录，请确认已安装。commit 继续。")
+        return 0
+
+    project_label = parsed["project"]
+    hours = parsed["hours"]
+    content = parsed.get("content", "")
+    log(
+        f"检测到工作日志 tag：项目='{project_label}' 工时={hours}h"
+        + (f" 内容='{content[:40]}'" if content else "")
+    )
+    ok, body = run_skill(skill_dir, parsed)
+    if ok:
+        log("✓ 工作日志已自动写入。commit 继续。")
+        if body:
+            # Surface last useful line (rowid or source) to stderr for user visibility
+            for line in body.splitlines()[::-1]:
+                if "rowid" in line or "写入成功" in line or "DRY-RUN" in line:
+                    log(line.strip())
+                    break
+        return 0
+    else:
+        log(f"⚠️ 写工作日志失败，但 commit 已继续。错误片段：{body[-400:]}")
+        return 0  # never block commit
+
+
+if __name__ == "__main__":
+    sys.exit(main())

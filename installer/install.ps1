@@ -1,1 +1,463 @@
-@installer/install.ps1
+﻿# mingdao-worklog-api 一键安装脚本 (Windows PowerShell 5+)
+#
+# 用法：
+#   # 标准用法（线上安装，从 GitHub 拉）——支持 irm ... | iex
+#   irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.ps1 | iex
+#
+#   # 指定仓库 / 跳过凭证环节（CI / 离线）
+#   $env:REPO_URL = "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
+#   $env:MINGDAO_APPKEY = "..."
+#   $env:MINGDAO_SECRETKEY = "..."
+#   $env:MINGDAO_DEFAULT_EMPLOYEE = "你的真实姓名"
+#   irm ...install.ps1 | iex
+#
+#   # 本地开发（从本地目录拷，不走 git）
+#   $env:WORKLOG_LOCAL_SOURCE = "C:\path\to\this\repo"; irm ...install.ps1 | iex
+#   # 或先下载再执行：irm ... -OutFile install.ps1; .\install.ps1
+#
+# 设计原则：
+#   - 脚本兼容 irm ... | iex：用环境变量传参，不用 param() 块
+#   - AGENTS.md 声明 + commit-msg hook 双触发，但 hook 单独询问是否装
+#   - 安装到所有当前存在的 agent 工具配置目录（探测），不强制创建空目录
+#   - junction 一源五用，文件集中管理
+#   - 凭证输入不回显，使用 SecureString
+#   - 不破坏用户已有 config.json（已存在则保留，仅在 WORKLOG_FORCE_CONFIG 时覆盖）
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference   = "SilentlyContinue"  # 关闭 irm 进度条
+
+# ============== 常量 ==============
+# 测试钩子：设置 $env:WORKLOG_TEST_HOME = "<sandbox>" 后，所有 home 路径都重定向（不污染真实工作区）
+$H = if ($env:WORKLOG_TEST_HOME) { $env:WORKLOG_TEST_HOME } else { $HOME }
+# 写入文件用无 BOM UTF-8（Python json.load + 多数 agent 工具不认 BOM）
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$SKILL_NAME   = "mingdao-worklog-api"
+
+# 为了兼容 irm ... | iex，参数统一走环境变量（不能用 param() 块）
+[string]$LocalSource = if ($env:WORKLOG_LOCAL_SOURCE) { $env:WORKLOG_LOCAL_SOURCE } else { "" }
+[string]$TargetDir   = if ($env:WORKLOG_TARGET_DIR)   { $env:WORKLOG_TARGET_DIR }   else { "" }
+[bool]$ForceConfig   = if ($env:WORKLOG_FORCE_CONFIG) { $true } else { $false }
+[bool]$NoHook        = if ($env:WORKLOG_NO_HOOK)      { $true } else { $false }
+[bool]$Unattended    = if ($env:UNATTENDED)            { $true } else { $false }
+$TARGET_DIR   = if ($TargetDir) { $TargetDir } else { Join-Path $H ".workbuddy\skills\$SKILL_NAME" }
+$REPO_URL     = if ($env:REPO_URL)     { $env:REPO_URL }     else { "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git" }
+$BRANCH       = if ($env:BRANCH)       { $env:BRANCH }       else { "main" }
+
+# ============== 工具函数 ==============
+function Write-Step($n, $msg) {
+    Write-Host ""
+    Write-Host "[$n/$((@($Steps).Count))] $msg" -ForegroundColor Cyan
+}
+function Write-OK($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
+function Write-Warn($msg) { Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
+function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
+
+function Test-Python {
+    try { $v = & python --version 2>&1; if ($LASTEXITCODE -eq 0) { return "python" } } catch {}
+    try { $v = & py -3 --version 2>&1; if ($LASTEXITCODE -eq 0) { return "py -3"   } } catch {}
+    # 兜底：uv 提供 `uv run python` 解释器能力，无需全局 Python
+    try { $v = & uv run python --version 2>&1; if ($LASTEXITCODE -eq 0) { return "uv run python" } } catch {}
+    return $null
+}
+function Test-Git {
+    try { $v = & git --version 2>&1; if ($LASTEXITCODE -eq 0) { return $true } } catch {}
+    return $false
+}
+
+# Windows 上普遍只有 `python` 命令而没有 `python3`，而 commit-msg hook 的
+# shebang 是 `#!/usr/bin/env python3` —— 缺这个命令会让钩子起不来，导致
+# 所有 git commit 被中止（实测复现）。这里在 ~\bin 下建一个指向真实
+# python 的垫片（sh 脚本，供 Git for Windows 的 sh 解析），并确保其在用户 PATH。
+function Ensure-Python3Shim {
+    if ($env:OS -ne "Windows_NT") { return }
+    $hasPy3 = $false
+    try { & python3 --version 2>&1 | Out-Null; $hasPy3 = ($LASTEXITCODE -eq 0) } catch {}
+    if ($hasPy3) { return }
+    $realPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $realPy) { return }   # 只有 uv 兜底的场景装不了 sh 垫片，交给 README 排错
+    $binDir = Join-Path $HOME "bin"
+    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    # 转成 Git Bash 风格路径：C:\...\python.exe → /c/.../python.exe
+    $fwd = $realPy -replace '\\', '/'
+    $shimTarget = if ($fwd -match '^([A-Za-z]):/(.*)$') { "/" + $Matches[1].ToLower() + "/" + $Matches[2] } else { $fwd }
+    $shim = Join-Path $binDir "python3"
+    Set-Content -Path $shim -Value "#!/bin/sh`nexec `"$shimTarget`" `"`$@`"" -Encoding ASCII
+    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath -and ($userPath -split ';') -notcontains $binDir) {
+        [System.Environment]::SetEnvironmentVariable("PATH", "$binDir;$userPath", "User")
+    }
+    Write-OK "已创建 python3 垫片：$shim（commit-msg hook 依赖 python3 命令）"
+}
+
+# 自动装 Python（或 uv）。所有步骤都无管理员权限、用户态安装。
+# 优先级：winget > uv（Astral，单 exe ~13MB）> 引导到 python.org
+function Install-Python {
+    Write-Warn "未检测到 Python。正在尝试自动安装（无需管理员权限）..."
+
+    # 1. 优先 winget（Windows 10 1809+ / Server 2019+ 自带）
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "  → 尝试 winget install Python.Python.3.12 ..." -ForegroundColor Yellow
+        & winget install --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --scope user
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "winget 安装完成，重新检测..."
+            Start-Sleep -Seconds 2
+            $r = Test-Python
+            if ($r) { return $r }
+        } else {
+            Write-Warn "winget 失败（exit=$LASTEXITCODE），fallback 到 uv"
+        }
+    } else {
+        Write-Host "  → winget 不在（需 Windows 10 1809+ 且 App Installer），fallback 到 uv" -ForegroundColor Yellow
+    }
+
+    # 2. 兜底：uv（Astral 出品，单 exe，~13MB，跨平台一致）
+    Write-Host "  → 尝试安装 uv（https://astral.sh/uv）..." -ForegroundColor Yellow
+    $tmp = [System.IO.Path]::GetTempFileName() + ".ps1"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        (New-Object System.Net.WebClient).DownloadString('https://astral.sh/uv/install.ps1') | Out-File -FilePath $tmp -Encoding UTF8
+        & powershell -ExecutionPolicy Bypass -File $tmp
+        if ($LASTEXITCODE -eq 0) {
+            # uv 装到 ~/.local/bin/uv，要刷新 PATH
+            $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+            [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "User")
+            Start-Sleep -Seconds 1
+            $r = Test-Python
+            if ($r) { return $r }
+        } else {
+            Write-Warn "uv 安装失败"
+        }
+    } catch {
+        Write-Warn "uv 下载/执行异常：$_"
+    } finally {
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+    }
+
+    # 3. 全失败：明确报错 + 引导
+    Write-Err "无法自动装上 Python。请手动装一项后重跑："
+    Write-Host "    方案 A（推荐）：运行以下一行装 uv（~13MB，跨平台）" -ForegroundColor Yellow
+    Write-Host "      irm https://astral.sh/uv/install.ps1 | iex" -ForegroundColor Yellow
+    Write-Host "    方案 B：从 https://www.python.org/downloads/ 下载 Python 3.10+ 安装" -ForegroundColor Yellow
+    return $null
+}
+
+function Read-Secret([string]$prompt) {
+    Write-Host $prompt -NoNewline
+    $secure = Read-Host -AsSecureString
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+# ============== 0. 横幅 ==============
+Write-Host ""
+Write-Host "=== mingdao-worklog-api 一键安装 (Windows) ===" -ForegroundColor Cyan
+Write-Host "Skill 源：$REPO_URL"
+Write-Host "目标：$TARGET_DIR"
+Write-Host ""
+
+$Steps = @(
+    "检测 Python / Git",
+    "获取明道云凭证 + 默认员工名称",
+    "拉取 skill 源文件",
+    "写入 config.json",
+    "创建 agent 工具 junction",
+    "写入 AGENTS.md / CLAUDE.md 声明",
+    "安装 commit-msg hook (可选)",
+    "运行 test-auth 验证"
+)
+$stepIdx = 0
+
+# ============== 1. Python / Git ==============
+$stepIdx++
+Write-Step $stepIdx "检测 Python / Git"
+$python = Test-Python
+if (-not $python) {
+    $python = Install-Python
+}
+if (-not $python) { exit 1 }
+Write-OK "Python: $python"
+Ensure-Python3Shim
+if (-not (Test-Git)) {
+    Write-Warn "未检测到 git。若 LocalSource 为空且目标目录不存在会失败。可安装 git for windows 或用 -LocalSource。"
+} else {
+    Write-OK "Git 已安装"
+}
+
+# ============== 2. 凭证 + 默认员工 ==============
+$stepIdx++
+Write-Step $stepIdx "获取明道云凭证 + 默认员工名称"
+$appKey      = $env:MINGDAO_APPKEY
+$secretKey   = $env:MINGDAO_SECRETKEY
+$defaultEmployee = $env:MINGDAO_DEFAULT_EMPLOYEE
+
+if (-not $Unattended -and (-not $appKey -or -not $secretKey)) {
+    Write-Host "  (在「明道云 → 应用 → 应用授权」获取 appKey + secretKey)"
+    Write-Host "  (输入不回显；如不想现在填可 Ctrl+C 中断后用环境变量 MINGDAO_APPKEY / MINGDAO_SECRETKEY 重跑)"
+    if (-not $appKey)    { $appKey    = Read-Host "  appKey" }
+    if (-not $secretKey) { $secretKey = Read-Secret "  secretKey (不回显)" }
+}
+if (-not $appKey -or -not $secretKey) { Write-Err "缺少 appKey 或 secretKey"; exit 1 }
+Write-OK "appKey/secretKey 已接收（不回显）"
+
+# 默认员工：必填（避免写日志时无主）。环境变量优先；交互时循环问直到 trim 后非空
+if (-not $defaultEmployee -and -not $Unattended) {
+    while (-not ($defaultEmployee -and $defaultEmployee.Trim())) {
+        Write-Host "  默认员工名称：不传员工参数时按这个名字写日志（必填，例如你的真实姓名）"
+        $input = Read-Host "  默认员工名称（必填，不能直接回车）"
+        if ($input -and $input.Trim()) {
+            $defaultEmployee = $input.Trim()
+        } else {
+            Write-Warn "  默认员工不能为空，请输入你的真实姓名"
+        }
+    }
+}
+if (-not ($defaultEmployee -and $defaultEmployee.Trim())) { Write-Err "缺少默认员工（可设环境变量 MINGDAO_DEFAULT_EMPLOYEE 重试）"; exit 1 }
+Write-OK "默认员工：$defaultEmployee"
+
+# ============== 3. 拉取源文件 ==============
+$stepIdx++
+Write-Step $stepIdx "拉取 skill 源文件"
+
+if ($LocalSource) {
+    if (-not (Test-Path $LocalSource)) { Write-Err "LocalSource 不存在：$LocalSource"; exit 1 }
+    if (Test-Path $TARGET_DIR) {
+        Write-Warn "$TARGET_DIR 已存在，跳过拷贝（用 -ForceConfig 或手动删除后再装）"
+    } else {
+        New-Item -ItemType Directory -Path $TARGET_DIR -Force | Out-Null
+        Copy-Item -Path (Join-Path $LocalSource "*") -Destination $TARGET_DIR -Recurse -Force
+        Write-OK "已从 $LocalSource 拷贝到 $TARGET_DIR"
+    }
+} else {
+    # 检测是否有 git
+    $hasGit = Test-Git
+    if (Test-Path $TARGET_DIR) {
+        if ($hasGit) {
+            Write-Host "  目录已存在，git pull 更新..."
+            Push-Location $TARGET_DIR
+            try { & git pull --ff-only 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { throw } }
+            catch { Write-Warn "git pull 失败，使用现有目录继续" }
+            Pop-Location
+        } else {
+            Write-Warn "  目录已存在但未装 git，跳过更新（用现有目录继续）"
+        }
+    } else {
+        New-Item -ItemType Directory -Path (Split-Path $TARGET_DIR) -Force | Out-Null
+        if ($hasGit) {
+            Write-Host "  git clone $REPO_URL ..."
+            & git clone --depth 1 --branch $BRANCH $REPO_URL $TARGET_DIR
+            if ($LASTEXITCODE -ne 0) { Write-Err "git clone 失败"; exit 1 }
+        } else {
+            # Fallback：没 git 就下载 GitHub zipball 并解压
+            Write-Host "  未检测到 git，用 zipball 下载替代..."
+            # REPO_URL 形如 https://github.com/<user>/<repo>.git → 推 https://api.github.com/repos/<user>/<repo>/zipball/<branch>
+            $zipUrl = $REPO_URL -replace '\.git$', ''
+            $zipUrl = "$zipUrl/archive/$BRANCH.zip"
+            Write-Host "  下载 $zipUrl ..."
+            $tmpZip = [System.IO.Path]::GetTempFileName() + ".zip"
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tmpZip -UseBasicParsing -ErrorAction Stop
+                # 用 PS 5.1 内置 Expand-Archive，无需 Add-Type
+                $extractTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("worklog_extract_" + [Guid]::NewGuid().ToString("N"))
+                New-Item -ItemType Directory -Path $extractTmp -Force | Out-Null
+                Expand-Archive -Path $tmpZip -DestinationPath $extractTmp -Force
+                $inner = Get-ChildItem -Path $extractTmp -Directory | Select-Object -First 1
+                if (-not $inner) { Write-Err "zipball 解压后找不到顶层目录"; exit 1 }
+                # 把 inner 目录里的所有内容 move 到 TARGET_DIR
+                Get-ChildItem -Path $inner.FullName -Force | ForEach-Object {
+                    Move-Item -Path $_.FullName -Destination $TARGET_DIR -Force
+                }
+                Remove-Item -Recurse -Force $extractTmp -ErrorAction SilentlyContinue
+                Write-OK "已下载并解压到 $TARGET_DIR"
+            } catch {
+                Write-Err "下载/解压失败：$_"
+                Write-Host "    请手动装 git（https://git-scm.com）后重跑，或用 -LocalSource 拷本地源" -ForegroundColor Yellow
+                exit 1
+            } finally {
+                Remove-Item $tmpZip -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    Write-OK "skill 源文件已就位"
+}
+
+if (-not (Test-Path (Join-Path $TARGET_DIR "scripts\worklog_api.py"))) {
+    Write-Err "源文件目录里找不到 scripts\worklog_api.py，源仓库结构异常"; exit 1
+}
+
+# ============== 4. config.json ==============
+$stepIdx++
+Write-Step $stepIdx "写入 config.json"
+$configPath = Join-Path $TARGET_DIR "config.json"
+$examplePath = Join-Path $TARGET_DIR "config.example.json"
+
+if ((Test-Path $configPath) -and -not $ForceConfig) {
+    Write-Warn "$configPath 已存在，未覆盖（用 -ForceConfig 强制覆盖）"
+} else {
+    if (-not (Test-Path $examplePath)) { Write-Err "config.example.json 不存在"; exit 1 }
+    $cfgJson = Get-Content $examplePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $cfgJson.appKey    = $appKey
+    $cfgJson.secretKey = $secretKey
+    # 与 install.sh 对齐：把默认员工名称写进 config（漏写会导致写日志时无主）
+    if ($defaultEmployee -and $defaultEmployee.Trim()) { $cfgJson.default_employee_name = $defaultEmployee.Trim() }
+    # 写入用 utf8 without BOM（Python json.load 不认 BOM；PowerShell Set-Content -Encoding UTF8 默认加 BOM）
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $jsonText = $cfgJson | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($configPath, $jsonText, $utf8NoBom)
+    Write-OK "已写入 $configPath（无 BOM）"
+}
+
+# ============== 5. junction ==============
+$stepIdx++
+Write-Step $stepIdx "创建 agent 工具 junction"
+$links = @(
+    @{ Path = "$H\.claude\skills";        Tool = "Claude Code"        },
+    @{ Path = "$H\.codex\skills";         Tool = "OpenAI Codex"       },
+    @{ Path = "$H\.agents\skills";        Tool = "通用（Antigravity / 其他兼容 agent）" },
+    @{ Path = "$H\.config\opencode\skills"; Tool = "OpenCode"          },
+    @{ Path = "$H\.zcode\skills";         Tool = "ZCode（智谱）"        },
+    @{ Path = "$H\.gemini\config\skills"; Tool = "Google Antigravity"  }
+)
+foreach ($l in $links) {
+    $parent = $l.Path
+    $link   = Join-Path $parent $SKILL_NAME
+    if (-not (Test-Path $parent)) { continue }  # 探测：本机未装该工具就跳过
+    if (Test-Path $link) {
+        Write-OK "  已存在 → $Tool"
+    } else {
+        try {
+            New-Item -ItemType Junction -Path $link -Target $TARGET_DIR -Force | Out-Null
+            Write-OK "  创建 → $Tool  ($link)"
+        } catch {
+            Write-Warn "  创建失败 ($Tool)：$_"
+        }
+    }
+}
+
+# ============== 6. AGENTS.md 声明 ==============
+$stepIdx++
+Write-Step $stepIdx "写入 AGENTS.md / CLAUDE.md 声明"
+$fragmentPath = Join-Path $TARGET_DIR "installer\AGENTS.fragment.md"
+if (-not (Test-Path $fragmentPath)) {
+    Write-Warn "未找到 $fragmentPath，跳过声明"
+} else {
+    $fragment = Get-Content $fragmentPath -Raw -Encoding UTF8
+    $candidates = @(
+        @{ Path = "$H\.claude\CLAUDE.md";        Type = "append"; Marker = "<!-- CODEGRAPH_END -->" },
+        @{ Path = "$H\.codex\AGENTS.md";         Type = "append"; Marker = "<!-- CODEGRAPH_END -->" },
+        @{ Path = "$H\.agents\AGENTS.md";        Type = "create"; Marker = $null                   }
+    )
+    foreach ($c in $candidates) {
+        $f = $c.Path
+        if ($c.Type -eq "append" -and -not (Test-Path $f)) { continue }   # 仅探测到才追加
+        if ($c.Type -eq "create" -and -not (Test-Path (Split-Path $f))) { continue }
+        if ((Test-Path $f) -and (Select-String -Path $f -Pattern "WORKLOG_MINGDAO_BEGIN" -Quiet)) {
+            Write-Warn "  已声明，跳过 → $f"
+            continue
+        }
+        $dir = Split-Path $f
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        if ($c.Type -eq "append" -and $c.Marker -and (Test-Path $f) -and (Select-String -Path $f -Pattern $c.Marker -Quiet)) {
+            # 在 CODEGRAPH 块后追加（无 BOM）
+            $content = Get-Content $f -Raw -Encoding UTF8
+            $content = $content -replace [regex]::Escape($c.Marker), ($c.Marker + "`r`n`r`n" + $fragment)
+            [System.IO.File]::WriteAllText($f, $content, $utf8NoBom)
+        } else {
+            # 全新写入 / 追加（无 BOM）
+            if (Test-Path $f) {
+                $cur = Get-Content $f -Raw -Encoding UTF8
+                [System.IO.File]::WriteAllText($f, $cur + "`r`n`r`n" + $fragment, $utf8NoBom)
+            } else {
+                [System.IO.File]::WriteAllText($f, $fragment, $utf8NoBom)
+            }
+        }
+        Write-OK "  写入 → $f"
+    }
+}
+
+# ============== 7. commit-msg hook ==============
+$stepIdx++
+Write-Step $stepIdx "安装 commit-msg hook (可选)"
+$installHook = $false
+if ($NoHook) {
+    Write-Warn "  -NoHook，跳过"
+} elseif (-not (Test-Git)) {
+    Write-Warn "  未检测到 git，跳过（commit-msg hook 是 git 功能，需要先装 git）"
+} elseif ($Unattended) {
+    if ($env:WORKLOG_NO_HOOK) { Write-Warn "  环境变量 WORKLOG_NO_HOOK 跳过" } else { $installHook = $true }
+} else {
+    $ans = Read-Host "  是否安装 git commit-msg hook？(Y/n)"
+    if ($ans -notin @("n","N","no","NO")) { $installHook = $true }
+}
+if ($installHook) {
+    $hookSrc  = Join-Path $TARGET_DIR "installer\hooks\commit-msg"
+    $hookDir  = "$H\.git_hooks"
+    $hookDst  = Join-Path $hookDir "commit-msg"
+    if (-not (Test-Path $hookSrc)) { Write-Err "  hook 源缺失：$hookSrc"; exit 1 }
+    if (-not (Test-Path $hookDir)) { New-Item -ItemType Directory -Path $hookDir -Force | Out-Null }
+    Copy-Item -Path $hookSrc -Destination $hookDst -Force
+    Write-OK "  hook 已复制到 $hookDst"
+    if ($env:WORKLOG_TEST_HOME) {
+        Write-Warn "  测试模式（WORKLOG_TEST_HOME 已设置），跳过 git config --global 写入"
+    } else {
+        & git config --global core.hooksPath "$H\.git_hooks"
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "  git config --global core.hooksPath 已设"
+        } else {
+            Write-Warn "  git config 设置失败，可手动执行：git config --global core.hooksPath '$H\.git_hooks'"
+        }
+    }
+}
+
+# ============== 8. test-auth ==============
+$stepIdx++
+Write-Step $stepIdx "运行 test-auth 验证"
+Push-Location $TARGET_DIR
+try {
+    # 用 cmd /c 调用 python，避免 PowerShell 5.1 Start-Process 的"PATH/Path"歧义
+    $tmpOut = [System.IO.Path]::GetTempFileName()
+    $tmpErr = [System.IO.Path]::GetTempFileName()
+    $pythonExe = "python"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+        if (Get-Command py -ErrorAction SilentlyContinue) { $pythonExe = "py -3" }
+    }
+    $cmdLine = "$pythonExe scripts\worklog_api.py --config config.json test-auth > `"$tmpOut`" 2> `"$tmpErr`""
+    cmd /c $cmdLine
+    $exitCode = $LASTEXITCODE
+    $stdoutTxt = ""
+    $stderrTxt = ""
+    if (Test-Path $tmpOut) { $stdoutTxt = Get-Content $tmpOut -Raw -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if (Test-Path $tmpErr) { $stderrTxt = Get-Content $tmpErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if ($exitCode -eq 0 -and ($stdoutTxt -match '"ok":\s*true' -or $stdoutTxt -match 'worksheet_name')) {
+        Write-OK "test-auth 通过！"
+    } else {
+        Write-Warn "test-auth 返回 exit=$exitCode（建议手工核对 python 配置，可能不影响使用）"
+        if ($stderrTxt) {
+            $short = ($stderrTxt -split "`n")[0..3] -join "`n"
+            Write-Host "    $short"
+        }
+        # 不让脚本整体 exit 1（test-auth 只是 sanity check，安装链路已完成）
+    }
+} catch {
+    Write-Warn "test-auth 步骤本身异常，但安装已完成，可忽略：$_"
+} finally {
+    Pop-Location
+}
+
+# ============== 完成 ==============
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Green
+Write-Host "  mingdao-worklog-api 安装完成" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "接下来可以："
+Write-Host "  1. 在 Claude Code / Codex / OpenCode / Antigravity 任一 agent 工具里说："
+Write-Host "        '帮我写一条工作日志'"
+Write-Host "  2. git commit -m '修复XX #log 项目:你的项目 #time=2h'（如装了 hook）自动写日志"
+Write-Host "  3. 想卸载：运行 uninstall.ps1"
+Write-Host ""
