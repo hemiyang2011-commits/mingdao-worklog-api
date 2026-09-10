@@ -2,10 +2,10 @@
 #
 # 用法：
 #   # 标准用法（线上安装，从 GitHub 拉）
-#   irm https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.ps1 | iex
 #
 #   # 指定仓库 / 跳过凭证环节（CI / 离线）
-#   $env:REPO_URL = "https://github.com/<USER>/mingdao-worklog-api.git"
+#   $env:REPO_URL = "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
 #   $env:MINGDAO_APPKEY = "..."
 #   $env:MINGDAO_SECRETKEY = "..."
 #   irm ...install.ps1 | iex
@@ -39,7 +39,7 @@ $H = if ($env:WORKLOG_TEST_HOME) { $env:WORKLOG_TEST_HOME } else { $HOME }
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $SKILL_NAME   = "mingdao-worklog-api"
 $TARGET_DIR   = if ($TargetDir) { $TargetDir } else { Join-Path $H ".workbuddy\skills\$SKILL_NAME" }
-$REPO_URL     = if ($env:REPO_URL)     { $env:REPO_URL }     else { "https://github.com/<YOUR-GITHUB-USERNAME>/mingdao-worklog-api.git" }
+$REPO_URL     = if ($env:REPO_URL)     { $env:REPO_URL }     else { "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git" }
 $BRANCH       = if ($env:BRANCH)       { $env:BRANCH }       else { "main" }
 
 # ============== 工具函数 ==============

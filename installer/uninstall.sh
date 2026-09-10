@@ -2,7 +2,7 @@
 # mingdao-worklog-api 一键卸载 (macOS / Linux)
 #
 # 用法：
-#   curl -fsSL https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/uninstall.sh | bash
 #
 # 开关：
 #   --remove-config   删除 config.json（默认保留）

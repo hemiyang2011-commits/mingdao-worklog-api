@@ -1,7 +1,7 @@
 ﻿# mingdao-worklog-api 一键卸载 (Windows PowerShell 5+)
 #
 # 用法：
-#   irm https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/uninstall.ps1 | iex
+#   irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/uninstall.ps1 | iex
 #
 #   # 非交互（CI）
 #   $env:UNATTENDED_REMOVE = "1"     # 全部按默认 Yes

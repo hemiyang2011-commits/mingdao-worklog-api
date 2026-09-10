@@ -3,10 +3,10 @@
 #
 # 用法：
 #   # 标准用法（线上安装，从 GitHub 拉）
-#   curl -fsSL https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.sh | bash
 #
 #   # 跳过交互（CI / 离线）
-#   REPO_URL=https://github.com/<USER>/mingdao-worklog-api.git \
+#   REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
 #   MINGDAO_APPKEY=xxx MINGDAO_SECRETKEY=yyy \
 #       curl -fsSL ... | bash
 #
@@ -18,7 +18,7 @@ set -euo pipefail
 # ============== 常量与默认值 ==============
 SKILL_NAME="mingdao-worklog-api"
 TARGET_DIR="$HOME/.workbuddy/skills/$SKILL_NAME"
-REPO_URL="${REPO_URL:-https://github.com/<YOUR-GITHUB-USERNAME>/mingdao-worklog-api.git}"
+REPO_URL="${REPO_URL:-https://github.com/hemiyang2011-commits/mingdao-worklog-api.git}"
 BRANCH="${BRANCH:-main}"
 LOCAL_SOURCE=""
 FORCE_CONFIG=0

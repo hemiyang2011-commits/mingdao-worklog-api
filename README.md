@@ -24,7 +24,7 @@
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/install.ps1 | iex
+irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.ps1 | iex
 ```
 
 回车后会提示：
@@ -39,20 +39,20 @@ irm https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/mingdao-worklog-api/main/installer/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.sh | bash
 ```
 
 ### 跳过交互（CI / 离线）
 
 ```bash
 # bash
-REPO_URL=https://github.com/<USER>/mingdao-worklog-api.git \
+REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
 MINGDAO_APPKEY=xxx \
 MINGDAO_SECRETKEY=yyy \
     curl -fsSL .../install.sh | bash
 
 # PowerShell
-$env:REPO_URL="https://github.com/<USER>/mingdao-worklog-api.git"
+$env:REPO_URL="https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
 $env:MINGDAO_APPKEY="xxx"
 $env:MINGDAO_SECRETKEY="yyy"
 irm .../install.ps1 | iex
