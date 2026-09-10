@@ -30,7 +30,6 @@
 4. **默认员工**走 `config.json` 里的 `default_employee_name`（install 时必填，记录安装者本人），传了 `--employee-name` 就临时覆盖。
 5. **项目」与「工作内容」分离**：项目是 rowid 关联，工作内容是自由文本。
 6. **项目经理自动带出**：脚本按项目自动反查项目档案，把「项目经理 / 项目经理用户」填入日志，agent 无需处理该字段；项目未配置经理则自动跳过。
-7. **部门/工作任务自动带出**：config 配了 `default_department_rowid` / `default_task_rowid`（本组织：研发部 / 开发）时自动填入，agent 无需处理；`--no-dept` / `--no-task` 可关闭。这两张表未授权，只能 rowid，不要尝试按名称查询。
 
 ### 调用脚本
 

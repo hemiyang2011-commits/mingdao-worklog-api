@@ -295,13 +295,6 @@ agent 自动：
 「项目经理」（关联）和「项目经理用户」（成员）字段，项目没配经理则自动跳过，
 `--no-pm` 可单次关闭。
 
-config.json 里配置了 `default_department_rowid`（部门，如研发部）和
-`default_task_rowid`（工作任务，如开发）时，还会**自动填「部门」「工作任务」**两个
-关联字段。部门表/工作任务表默认未对 appKey 授权，无法按名称反查，只支持 rowid；
-`--dept-rowid` / `--task-rowid` 单次覆盖，`--no-dept` / `--no-task` 单次关闭。
-rowid 的获取方式：从已填过该字段的日志行反查，或明道云行链接
-`/worksheet/<表id>/row/<rowid>` 的末段。
-
 ### 命令行直接写（不进 agent）
 
 ```bash

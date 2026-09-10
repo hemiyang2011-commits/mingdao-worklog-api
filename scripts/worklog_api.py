@@ -35,14 +35,6 @@ SHA256 再 base64。应用密钥的 sign 就是那个值本身。）
     填入工作日志的「项目经理」字段，「项目经理（内部）」成员的 accountId 填入
     「项目经理用户」字段。项目没配置经理则跳过；--no-pm 可单次关闭。
 
-部门/工作任务 默认值自动带出：
-    config.json 配置 worklog_dept_control_id + default_department_rowid（研发部）、
-    worklog_task_control_id + default_task_rowid（开发）后，每次写入自动带上。
-    部门表/工作任务表未对 appKey 授权（10005），无法按名称反查，因此只支持
-    rowid：--dept-rowid / --task-rowid 可单次覆盖，--no-dept / --no-task 可单次关闭。
-    （rowid 获取方式：从已填过该字段的行 getFilterRows 反查，或 Mingdao 行链接
-    /worksheet/<表id>/row/<rowid> 的末段。）
-
 用法示例：
     python worklog_api.py --config config.json test-auth
     python worklog_api.py --config config.json list-projects
@@ -54,7 +46,6 @@ SHA256 再 base64。应用密钥的 sign 就是那个值本身。）
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import sys
 import urllib.error
@@ -387,10 +378,9 @@ def cmd_add_row(args: argparse.Namespace) -> int:
     project_rowid, project_source = _resolve_project(cfg, args)
 
     controls: list[dict[str, Any]] = []
-    # 日期（Date，字符串）：未传时默认今天（帮助文本承诺的行为）；
-    # 不落日期控件的行在明道云按日期分组/筛选的视图里不可见
-    date_val = args.date or datetime.date.today().isoformat()
-    controls.append({"controlId": fields["date"], "value": date_val})
+    # 日期（Date，字符串）
+    if args.date:
+        controls.append({"controlId": fields["date"], "value": args.date})
     # 员工（单条关联，rowid 字符串）
     controls.append({"controlId": fields["employee"], "value": employee_rowid})
     # 项目（单条关联，rowid 字符串）
@@ -415,30 +405,6 @@ def cmd_add_row(args: argparse.Namespace) -> int:
         owner_source = "employee_profile"
     if owner_id:
         controls.append({"controlId": "ownerid", "value": owner_id})
-
-    # 部门（关联，单条 rowid 字符串）：config 默认值自动带出（如研发部）。
-    # 部门表未授权无法按名称反查，故只支持 rowid；--dept-rowid 覆盖 / --no-dept 关闭
-    dept_note = ""
-    dept_rowid = ""
-    if not args.no_dept:
-        dept_ctrl = cfg.get("worklog_dept_control_id", "")
-        dept_rowid = args.dept_rowid or cfg.get("default_department_rowid", "")
-        if dept_ctrl and dept_rowid:
-            controls.append({"controlId": dept_ctrl, "value": dept_rowid})
-        elif dept_ctrl and not dept_rowid:
-            dept_note = "（未配置 default_department_rowid，跳过部门字段）"
-
-    # 工作任务（关联，单条 rowid 字符串）：config 默认值自动带出（如「开发」）。
-    # 工作任务表未授权无法按名称反查，故只支持 rowid；--task-rowid 覆盖 / --no-task 关闭
-    task_note = ""
-    task_rowid = ""
-    if not args.no_task:
-        task_ctrl = cfg.get("worklog_task_control_id", "")
-        task_rowid = args.task_rowid or cfg.get("default_task_rowid", "")
-        if task_ctrl and task_rowid:
-            controls.append({"controlId": task_ctrl, "value": task_rowid})
-        elif task_ctrl and not task_rowid:
-            task_note = "（未配置 default_task_rowid，跳过工作任务字段）"
 
     # 项目经理（自动带出）：按项目 rowid 反查项目档案，填「项目经理」+「项目经理用户」。
     # 项目未配置经理/接口失败时静默跳过，不阻断写日志。--no-pm 可单次关闭。
@@ -474,10 +440,6 @@ def cmd_add_row(args: argparse.Namespace) -> int:
             "_pm_rowids": pm_rowids,
             "_pm_accountids": pm_accounts,
             "_pm_note": pm_note,
-            "_dept_rowid": dept_rowid,
-            "_task_rowid": task_rowid,
-            "_dept_note": dept_note,
-            "_task_note": task_note,
         }, ensure_ascii=False, indent=2))
         return 0
 
@@ -491,10 +453,8 @@ def cmd_add_row(args: argparse.Namespace) -> int:
     if ok:
         owner_hint = f"，owner 来自{owner_source}={owner_id}" if owner_id else "（未设置 ownerid）"
         pm_hint = f" | 项目经理={'/'.join(pm_rowids) or pm_note or '无'}" if not args.no_pm else " | 项目经理=未启用"
-        dept_hint = f" | 部门={dept_rowid}" if dept_rowid else f" | 部门={dept_note or '未启用'}"
-        task_hint = f" | 工作任务={task_rowid}" if task_rowid else f" | 工作任务={task_note or '未启用'}"
         print(f"\n✓ 写入成功 rowid={resp.get('data')}", file=sys.stderr)
-        print(f"  员工={employee_source} | 项目={project_source}{pm_hint}{dept_hint}{task_hint}{owner_hint}", file=sys.stderr)
+        print(f"  员工={employee_source} | 项目={project_source}{pm_hint}{owner_hint}", file=sys.stderr)
     else:
         print(f"\n✗ 写入失败（见上方响应）", file=sys.stderr)
     return 0 if ok else 1
@@ -548,10 +508,6 @@ def main(argv: list[str] | None = None) -> int:
     p_add.add_argument("--shift", default=None, help="时段：全天/上午/下午/其它")
     p_add.add_argument("--owner-account-id", default=None, help="拥有者（HAP accountId）。不传则取 config.json 的 default_owner_account_id；都没有则按员工档案自动查")
     p_add.add_argument("--no-pm", action="store_true", help="不自动带出项目经理（默认按项目档案自动带出）")
-    p_add.add_argument("--dept-rowid", default=None, help="部门 rowid（单次覆盖 config 的 default_department_rowid）")
-    p_add.add_argument("--no-dept", action="store_true", help="不自动填部门（默认取 config 的 default_department_rowid）")
-    p_add.add_argument("--task-rowid", default=None, help="工作任务 rowid（单次覆盖 config 的 default_task_rowid）")
-    p_add.add_argument("--no-task", action="store_true", help="不自动填工作任务（默认取 config 的 default_task_rowid）")
     p_add.add_argument("--no-workflow", action="store_true", help="不触发工作流")
     p_add.add_argument("--dry-run", action="store_true", help="只打印请求体，不发送")
 

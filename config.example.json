@@ -37,10 +37,5 @@
   "worklog_pm_control_id": "6a9a3190fb4db74579686eae",
   "worklog_pm_user_control_id": "6a9a3190fb4db74579686eb0",
   "project_pm_control_id": "69379024b820e34fd4b08276",
-  "project_pm_internal_control_id": "65e681fd183e53a3bc797105",
-  "_dept_task_comment": "部门/工作任务默认值自动带出：add-row 时把 default_*_rowid 填入对应关联字段（本组织：部门=研发部，工作任务=开发）。置空 rowid 或用 --no-dept/--no-task 可关闭。rowid 从已填该字段的行反查，或 Mingdao 行链接 /worksheet/<表id>/row/<rowid> 末段。",
-  "worklog_dept_control_id": "6aa23c69683cab0ff217d1b8",
-  "default_department_rowid": "在此填入部门表里「研发部」的 rowid",
-  "worklog_task_control_id": "699fc3c07269639034797d28",
-  "default_task_rowid": "在此填入工作任务表里「开发」的 rowid"
+  "project_pm_internal_control_id": "65e681fd183e53a3bc797105"
 }

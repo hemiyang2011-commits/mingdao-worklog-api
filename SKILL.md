@@ -136,10 +136,6 @@ python "<skill_dir>/scripts/worklog_api.py" --config "<skill_dir>/config.json" a
 - **项目经理自动带出**：解析出项目后，脚本反查项目档案把「项目经理」填入日志的
   「项目经理」（关联）和「项目经理用户」（成员）字段，无需传参。项目没配经理则
   跳过；`--no-pm` 可单次关闭。成员控件 value 是**单个 accountId 字符串**（数组会报 10001）。
-- **部门/工作任务 自动带出**：config.json 配置 `default_department_rowid`（如研发部）、
-  `default_task_rowid`（如开发）后，写入时自动填入「部门」「工作任务」关联字段，无需传参。
-  这两张表未对 appKey 授权（10005），**无法按名称反查，只支持 rowid**；
-  `--dept-rowid` / `--task-rowid` 可单次覆盖，`--no-dept` / `--no-task` 可单次关闭。
 
 ### Step 4. 读回校验
 
