@@ -12,11 +12,25 @@
 
 > 安装脚本会自动检测并安装缺失依赖，**正常情况下你什么都不用装**。只有离线/受限环境才需要手动装。
 
+### 必须依赖（缺了就跑不起来）
+
 | 依赖 | 最低版本 | 作用 | 装法 |
 |---|---|---|---|
-| **Python** | 3.8+ | 跑 `worklog_api.py` + `commit-msg` hook | 安装脚本自动装；离线时见下表 |
-| **Git** | 任意 | 拉源 + commit-msg hook | Windows 装 [Git for Windows](https://git-scm.com) |
+| **Python** | 3.8+ | 跑 `worklog_api.py` 调 API | 安装脚本自动装；离线时见下表 |
 | **明道云 appKey + secretKey** | — | 调 API 用 | 在「明道云 → 应用 → 应用授权」获取 |
+
+### 可选依赖（按需）
+
+| 依赖 | 什么时候需要 | 装法 |
+|---|---|---|
+| **Git** | 想用 commit-msg hook（提交时自动写日志）/ 想用 `git pull` 升级 | Windows: [Git for Windows](https://git-scm.com) ；macOS: `xcode-select --install`；Linux: `apt install git` |
+
+> 💡 **Git 不是必须的**。装 skill / 写工作日志都不需要 git。
+> - 在线安装走 `irm ... \| iex` 或 `curl ... \| bash`，本身不依赖 git
+> - 没 git 时 install 脚本自动 fallback 到下载 GitHub zipball/tarball 解压
+> - 没 git 时 commit-msg hook 步骤会自动跳过（不影响其它功能）
+>
+> 想用「git commit 自动写工作日志」时再装 git，install 脚本重跑一次即可补上 hook。
 
 ### 手动装 Python（仅当自动装失败时）
 
@@ -100,13 +114,13 @@ irm .../install.ps1 | iex
 
 | 步骤 | 行为 |
 |---|---|
-| 1 | 检测 `python3` / `git` 是否安装 |
+| 1 | 检测 `python3` 是否安装（git 可选，缺失时走 zipball/tarball 下载） |
 | 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（如 杨浪，可回车跳过） |
 | 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
 | 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
 | 5 | 在 6 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
 | 6 | 写入 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.agents/AGENTS.md` 三份声明（追加在已有内容尾部） |
-| 7 | 询问是否安装 git `commit-msg` hook（默认 Y） |
+| 7 | 若装了 git：询问是否安装 `commit-msg` hook；未装则自动跳过（默认 Y） |
 | 8 | 跑 `test-auth` 验证链路通 |
 
 > ⚠️ 安装脚本是**幂等的**——重复跑会跳过已完成步骤，更新 hook / config 时需加 `--force-config` 才会覆盖。

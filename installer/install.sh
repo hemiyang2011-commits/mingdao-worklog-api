@@ -193,8 +193,32 @@ else
         ok "$TARGET_DIR 已存在，跳过 clone"
     else
         mkdir -p "$(dirname "$TARGET_DIR")"
-        warn "git clone $REPO_URL ..."
-        git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TARGET_DIR"
+        if command -v git >/dev/null 2>&1; then
+            warn "git clone $REPO_URL ..."
+            git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TARGET_DIR"
+        else
+            # Fallback：没 git 就下载 GitHub tarball 并解压
+            TAR_URL="${REPO_URL%.git}/archive/$BRANCH.tar.gz"
+            warn "未检测到 git，用 tarball 下载替代: $TAR_URL"
+            TMP_TAR="$(mktemp -t worklog.XXXXXX.tar.gz)"
+            if ! curl -fsSL -o "$TMP_TAR" "$TAR_URL"; then
+                err "下载 tarball 失败。请手动装 git 后重跑，或用 --local 拷本地源。"
+                rm -f "$TMP_TAR"
+                exit 1
+            fi
+            TMP_EXTRACT="$(mktemp -d -t worklog.XXXXXX)"
+            if ! tar -xzf "$TMP_TAR" -C "$TMP_EXTRACT"; then
+                err "解压 tarball 失败"; rm -rf "$TMP_TAR" "$TMP_EXTRACT"; exit 1
+            fi
+            # GitHub tarball 解压后顶层是 <repo>-<branch>/ 子目录
+            INNER="$(ls -d "$TMP_EXTRACT"/*/ 2>/dev/null | head -1)"
+            if [[ -z "$INNER" || ! -d "$INNER" ]]; then
+                err "tarball 解压后找不到顶层目录"; rm -rf "$TMP_TAR" "$TMP_EXTRACT"; exit 1
+            fi
+            mv "$INNER" "$TARGET_DIR"
+            rm -rf "$TMP_TAR" "$TMP_EXTRACT"
+            ok "已下载并解压到 $TARGET_DIR"
+        fi
     fi
 fi
 if [[ ! -f "$TARGET_DIR/scripts/worklog_api.py" ]]; then
@@ -312,6 +336,8 @@ step 7 "$TOTAL_STEPS" "安装 commit-msg hook (可选)"
 INSTALL_HOOK=0
 if [[ "$NO_HOOK" -eq 1 ]]; then
     warn "--no-hook，跳过"
+elif ! command -v git >/dev/null 2>&1; then
+    warn "未检测到 git，跳过（commit-msg hook 是 git 功能，需要先装 git）"
 elif [[ "$UNATTENDED" -eq 1 ]]; then
     if [[ -z "${WORKLOG_NO_HOOK:-}" ]]; then INSTALL_HOOK=1; fi
 else

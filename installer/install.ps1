@@ -199,17 +199,55 @@ if ($LocalSource) {
         Write-OK "已从 $LocalSource 拷贝到 $TARGET_DIR"
     }
 } else {
+    # 检测是否有 git
+    $hasGit = Test-Git
     if (Test-Path $TARGET_DIR) {
-        Write-Host "  目录已存在，git pull 更新..."
-        Push-Location $TARGET_DIR
-        try { & git pull --ff-only 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { throw } }
-        catch { Write-Warn "git pull 失败，使用现有目录继续" }
-        Pop-Location
+        if ($hasGit) {
+            Write-Host "  目录已存在，git pull 更新..."
+            Push-Location $TARGET_DIR
+            try { & git pull --ff-only 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { throw } }
+            catch { Write-Warn "git pull 失败，使用现有目录继续" }
+            Pop-Location
+        } else {
+            Write-Warn "  目录已存在但未装 git，跳过更新（用现有目录继续）"
+        }
     } else {
         New-Item -ItemType Directory -Path (Split-Path $TARGET_DIR) -Force | Out-Null
-        Write-Host "  git clone $REPO_URL ..."
-        & git clone --depth 1 --branch $BRANCH $REPO_URL $TARGET_DIR
-        if ($LASTEXITCODE -ne 0) { Write-Err "git clone 失败"; exit 1 }
+        if ($hasGit) {
+            Write-Host "  git clone $REPO_URL ..."
+            & git clone --depth 1 --branch $BRANCH $REPO_URL $TARGET_DIR
+            if ($LASTEXITCODE -ne 0) { Write-Err "git clone 失败"; exit 1 }
+        } else {
+            # Fallback：没 git 就下载 GitHub zipball 并解压
+            Write-Host "  未检测到 git，用 zipball 下载替代..."
+            # REPO_URL 形如 https://github.com/<user>/<repo>.git → 推 https://api.github.com/repos/<user>/<repo>/zipball/<branch>
+            $zipUrl = $REPO_URL -replace '\.git$', ''
+            $zipUrl = "$zipUrl/archive/$BRANCH.zip"
+            Write-Host "  下载 $zipUrl ..."
+            $tmpZip = [System.IO.Path]::GetTempFileName() + ".zip"
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tmpZip -UseBasicParsing -ErrorAction Stop
+                # 用 PS 5.1 内置 Expand-Archive，无需 Add-Type
+                $extractTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("worklog_extract_" + [Guid]::NewGuid().ToString("N"))
+                New-Item -ItemType Directory -Path $extractTmp -Force | Out-Null
+                Expand-Archive -Path $tmpZip -DestinationPath $extractTmp -Force
+                $inner = Get-ChildItem -Path $extractTmp -Directory | Select-Object -First 1
+                if (-not $inner) { Write-Err "zipball 解压后找不到顶层目录"; exit 1 }
+                # 把 inner 目录里的所有内容 move 到 TARGET_DIR
+                Get-ChildItem -Path $inner.FullName -Force | ForEach-Object {
+                    Move-Item -Path $_.FullName -Destination $TARGET_DIR -Force
+                }
+                Remove-Item -Recurse -Force $extractTmp -ErrorAction SilentlyContinue
+                Write-OK "已下载并解压到 $TARGET_DIR"
+            } catch {
+                Write-Err "下载/解压失败：$_"
+                Write-Host "    请手动装 git（https://git-scm.com）后重跑，或用 -LocalSource 拷本地源" -ForegroundColor Yellow
+                exit 1
+            } finally {
+                Remove-Item $tmpZip -ErrorAction SilentlyContinue
+            }
+        }
     }
     Write-OK "skill 源文件已就位"
 }
@@ -312,6 +350,8 @@ Write-Step $stepIdx "安装 commit-msg hook (可选)"
 $installHook = $false
 if ($NoHook) {
     Write-Warn "  -NoHook，跳过"
+} elseif (-not (Test-Git)) {
+    Write-Warn "  未检测到 git，跳过（commit-msg hook 是 git 功能，需要先装 git）"
 } elseif ($Unattended) {
     if ($env:WORKLOG_NO_HOOK) { Write-Warn "  环境变量 WORKLOG_NO_HOOK 跳过" } else { $installHook = $true }
 } else {
