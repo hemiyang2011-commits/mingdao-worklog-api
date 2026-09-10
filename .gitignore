@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Local config (NEVER commit credentials)
+config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Workbuddy session artifacts
+.workbuddy/scratch/
+.tmp/
+
+# Local installer build cache
+installer/*.log
