@@ -136,7 +136,7 @@ Write-Host ""
 
 $Steps = @(
     "检测 Python / Git",
-    "获取明道云 appKey + secretKey",
+    "获取明道云凭证 + 默认员工名称",
     "拉取 skill 源文件",
     "写入 config.json",
     "创建 agent 工具 junction",
@@ -161,20 +161,29 @@ if (-not (Test-Git)) {
     Write-OK "Git 已安装"
 }
 
-# ============== 2. 凭证 ==============
+# ============== 2. 凭证 + 默认员工 ==============
 $stepIdx++
-Write-Step $stepIdx "获取明道云 appKey + secretKey"
-$appKey   = $env:MINGDAO_APPKEY
-$secretKey = $env:MINGDAO_SECRETKEY
+Write-Step $stepIdx "获取明道云凭证 + 默认员工名称"
+$appKey      = $env:MINGDAO_APPKEY
+$secretKey   = $env:MINGDAO_SECRETKEY
+$defaultEmployee = $env:MINGDAO_DEFAULT_EMPLOYEE
 
 if (-not $Unattended -and (-not $appKey -or -not $secretKey)) {
-    Write-Host "  (在另一台明道云 → 应用 → 应用授权获取 appKey + secretKey)"
+    Write-Host "  (在「明道云 → 应用 → 应用授权」获取 appKey + secretKey)"
     Write-Host "  (输入不回显；如不想现在填可 Ctrl+C 中断后用环境变量 MINGDAO_APPKEY / MINGDAO_SECRETKEY 重跑)"
-    if (-not $appKey)   { $appKey   = Read-Host "  appKey" }
-    if (-not $secretKey){ $secretKey = Read-Secret "  secretKey (不回显)" }
+    if (-not $appKey)    { $appKey    = Read-Host "  appKey" }
+    if (-not $secretKey) { $secretKey = Read-Secret "  secretKey (不回显)" }
 }
 if (-not $appKey -or -not $secretKey) { Write-Err "缺少 appKey 或 secretKey"; exit 1 }
 Write-OK "appKey/secretKey 已接收（不回显）"
+
+# 默认员工：环境变量优先；交互时给个示例默认（按回车就用），避免空字符串走模糊匹配
+if (-not $defaultEmployee -and -not $Unattended) {
+    Write-Host "  默认员工名称：不传员工参数时按这个名字写日志（用真实姓名如 杨浪；留空则每次必填）"
+    $input = Read-Host "  默认员工名称（直接回车 = 不设默认）"
+    if ($input) { $defaultEmployee = $input }
+}
+if ($defaultEmployee) { Write-OK "默认员工：$defaultEmployee" }
 
 # ============== 3. 拉取源文件 ==============
 $stepIdx++

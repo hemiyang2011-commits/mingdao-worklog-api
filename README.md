@@ -92,6 +92,8 @@ $env:MINGDAO_SECRETKEY="yyy"
 irm .../install.ps1 | iex
 ```
 
+> 想设默认员工时再加 `MINGDAO_DEFAULT_EMPLOYEE=杨浪`（bash）或 `$env:MINGDAO_DEFAULT_EMPLOYEE="杨浪"`（PS）。
+
 ---
 
 ## 📦 安装脚本会做什么
@@ -99,15 +101,33 @@ irm .../install.ps1 | iex
 | 步骤 | 行为 |
 |---|---|
 | 1 | 检测 `python3` / `git` 是否安装 |
-| 2 | 询问 / 接收 appKey + secretKey（不回显） |
+| 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（如 杨浪，可回车跳过） |
 | 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
-| 4 | 写入 `config.json`（从 example + 凭证） |
+| 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
 | 5 | 在 5 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
 | 6 | 写入 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.agents/AGENTS.md` 三份声明（追加在已有内容尾部） |
 | 7 | 询问是否安装 git `commit-msg` hook（默认 Y） |
 | 8 | 跑 `test-auth` 验证链路通 |
 
 > ⚠️ 安装脚本是**幂等的**——重复跑会跳过已完成步骤，更新 hook / config 时需加 `--force-config` 才会覆盖。
+
+### 跳过交互（CI / 离线）
+
+```bash
+# bash
+REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
+MINGDAO_APPKEY=xxx \
+MINGDAO_SECRETKEY=yyy \
+MINGDAO_DEFAULT_EMPLOYEE=杨浪 \
+    curl -fsSL .../install.sh | bash
+
+# PowerShell
+$env:REPO_URL="https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
+$env:MINGDAO_APPKEY="xxx"
+$env:MINGDAO_SECRETKEY="yyy"
+$env:MINGDAO_DEFAULT_EMPLOYEE="杨浪"
+irm .../install.ps1 | iex
+```
 
 ---
 
@@ -181,7 +201,7 @@ python ~/.workbuddy/skills/mingdao-worklog-api/scripts/worklog_api.py \
 
 ```bash
 python ... add-row \
-    --employee-name "陈剑灵" \
+    --employee-name "杨浪" \
     --project-name "三农二期" \
     --content "..." --hours 3
 ```

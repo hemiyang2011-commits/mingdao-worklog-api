@@ -211,11 +211,15 @@ if [[ -f "$CFG" && "$FORCE_CONFIG" -eq 0 ]]; then
     warn "$CFG 已存在，未覆盖（用 --force-config 强制覆盖）"
 else
     [[ -f "$EXAMPLE" ]] || { err "config.example.json 不存在"; exit 1; }
-    APPKEY="$APPKEY" SECRETKEY="$SECRETKEY" EXAMPLE="$EXAMPLE" CFG="$CFG" "$PY" - <<'PYEOF'
+    APPKEY="$APPKEY" SECRETKEY="$SECRETKEY" DEFAULT_EMPLOYEE="$DEFAULT_EMPLOYEE" \
+        EXAMPLE="$EXAMPLE" CFG="$CFG" "$PY" - <<'PYEOF'
 import json, os
 cfg = json.load(open(os.environ["EXAMPLE"], encoding="utf-8"))
 cfg["appKey"]    = os.environ["APPKEY"]
 cfg["secretKey"] = os.environ["SECRETKEY"]
+de = os.environ.get("DEFAULT_EMPLOYEE", "").strip()
+if de:
+    cfg["default_employee_name"] = de
 import sys
 sys.stderr.write("[ok] credentials injected\n")
 with open(os.environ["CFG"], "w", encoding="utf-8") as f:

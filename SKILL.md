@@ -120,7 +120,7 @@ agent_created: true
 ```bash
 python "<skill_dir>/scripts/worklog_api.py" --config "<skill_dir>/config.json" add-row \
     --date "2026-09-04" \
-    --employee-name "陈剑灵"          # 可选；不传则走 config 默认
+    --employee-name "杨浪"          # 可选；不传则走 config 默认
     --project-name "资产管理系统与OA系统"  # 可选；不传则走 config 默认
     --content "开发2小时" \
     --hours 2 \
