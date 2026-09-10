@@ -78,10 +78,12 @@ irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/m
 回车后会提示：
 
 ```
-[2/8] 获取明道云 appKey + secretKey
+[2/8] 获取明道云凭证 + 默认员工名称
   在「明道云 → 应用 → 应用授权」获取 appKey + secretKey
   appKey: 4989bba1409c354e
   secretKey (不回显): ********
+  默认员工名称：不传员工参数时按这个名字写日志（必填，例如你的真实姓名）
+  默认员工名称（必填，不能直接回车）: 杨浪
 ```
 
 ### macOS / Linux
@@ -89,41 +91,6 @@ irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/m
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.sh | bash
 ```
-
-### 跳过交互（CI / 离线）
-
-```bash
-# bash
-REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
-MINGDAO_APPKEY=xxx \
-MINGDAO_SECRETKEY=yyy \
-    curl -fsSL .../install.sh | bash
-
-# PowerShell
-$env:REPO_URL="https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
-$env:MINGDAO_APPKEY="xxx"
-$env:MINGDAO_SECRETKEY="yyy"
-irm .../install.ps1 | iex
-```
-
-> 跳过交互时设 `MINGDAO_DEFAULT_EMPLOYEE=<你的真实姓名>`（bash）/ `$env:MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>"`（PS）。
-
----
-
-## 📦 安装脚本会做什么
-
-| 步骤 | 行为 |
-|---|---|
-| 1 | 检测 `python3` 是否安装（git 可选，缺失时走 zipball/tarball 下载） |
-| 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（**必填**，从环境变量或交互输入） |
-| 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
-| 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
-| 5 | 在 6 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
-| 6 | 写入 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.agents/AGENTS.md` 三份声明（追加在已有内容尾部） |
-| 7 | 若装了 git：询问是否安装 `commit-msg` hook；未装则自动跳过（默认 Y） |
-| 8 | 跑 `test-auth` 验证链路通 |
-
-> ⚠️ 安装脚本是**幂等的**——重复跑会跳过已完成步骤，更新 hook / config 时需加 `--force-config` 才会覆盖。
 
 ### 跳过交互（CI / 离线）
 
@@ -142,6 +109,58 @@ $env:MINGDAO_SECRETKEY="yyy"
 $env:MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>"
 irm .../install.ps1 | iex
 ```
+
+> Windows 脚本为了兼容 `irm ... | iex` **统一走环境变量传参**，不再使用 `-LocalSource` 等参数。
+
+---
+
+## 📦 安装脚本会做什么
+
+| 步骤 | 行为 |
+|---|---|
+| 1 | 检测 `python3` 是否安装（git 可选，缺失时走 zipball/tarball 下载） |
+| 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（**必填**，从环境变量或交互输入） |
+| 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
+| 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
+| 5 | 在 6 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
+| 6 | 写入 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.agents/AGENTS.md` 三份声明（追加在已有内容尾部） |
+| 7 | 若装了 git：询问是否安装 `commit-msg` hook；未装则自动跳过（默认 Y） |
+| 8 | 跑 `test-auth` 验证链路通 |
+
+> ⚠️ 安装脚本是**幂等的**——重复跑会跳过已完成步骤。更新 hook / config 时设环境变量 `WORKLOG_FORCE_CONFIG=1` 才会覆盖。
+
+### 跳过交互（CI / 离线）
+
+```bash
+# bash
+REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
+MINGDAO_APPKEY=xxx \
+MINGDAO_SECRETKEY=yyy \
+MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>" \
+    curl -fsSL .../install.sh | bash
+
+# PowerShell
+$env:REPO_URL="https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
+$env:MINGDAO_APPKEY="xxx"
+$env:MINGDAO_SECRETKEY="yyy"
+$env:MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>"
+irm .../install.ps1 | iex
+```
+
+### 环境变量清单（PS 用 `$env:NAME`，bash 用 `NAME=value`）
+
+| 变量 | 作用 |
+|---|---|
+| `MINGDAO_APPKEY` | 明道云 appKey（交互时会被问到） |
+| `MINGDAO_SECRETKEY` | 明道云 secretKey（交互时不回显） |
+| `MINGDAO_DEFAULT_EMPLOYEE` | 默认员工姓名（**必填**，CI / 跳过交互用） |
+| `REPO_URL` | 自定义仓库，默认是 hemiyang2011-commits 的 GitHub |
+| `BRANCH` | 自定义分支，默认 `main` |
+| `WORKLOG_LOCAL_SOURCE` | 本地开发：从本地目录拷源文件，不走 git/zipball |
+| `WORKLOG_TARGET_DIR` | 测试用：覆盖默认安装路径 |
+| `WORKLOG_FORCE_CONFIG` | 若设置，强制覆盖已存在的 `config.json` |
+| `WORKLOG_NO_HOOK` | 若设置，跳过 commit-msg hook 安装 |
+| `UNATTENDED` | 若设置，全程不弹交互（必须同时设 appKey / secretKey / defaultEmployee） |
 
 ---
 

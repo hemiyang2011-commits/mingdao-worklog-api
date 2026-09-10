@@ -1,33 +1,27 @@
 ﻿# mingdao-worklog-api 一键安装脚本 (Windows PowerShell 5+)
 #
 # 用法：
-#   # 标准用法（线上安装，从 GitHub 拉）
+#   # 标准用法（线上安装，从 GitHub 拉）——支持 irm ... | iex
 #   irm https://raw.githubusercontent.com/hemiyang2011-commits/mingdao-worklog-api/main/installer/install.ps1 | iex
 #
 #   # 指定仓库 / 跳过凭证环节（CI / 离线）
 #   $env:REPO_URL = "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
 #   $env:MINGDAO_APPKEY = "..."
 #   $env:MINGDAO_SECRETKEY = "..."
+#   $env:MINGDAO_DEFAULT_EMPLOYEE = "你的真实姓名"
 #   irm ...install.ps1 | iex
 #
 #   # 本地开发（从本地目录拷，不走 git）
-#   .\installer\install.ps1 -LocalSource "C:\path\to\this\repo"
+#   $env:WORKLOG_LOCAL_SOURCE = "C:\path\to\this\repo"; irm ...install.ps1 | iex
+#   # 或先下载再执行：irm ... -OutFile install.ps1; .\install.ps1
 #
 # 设计原则：
+#   - 脚本兼容 irm ... | iex：用环境变量传参，不用 param() 块
 #   - AGENTS.md 声明 + commit-msg hook 双触发，但 hook 单独询问是否装
 #   - 安装到所有当前存在的 agent 工具配置目录（探测），不强制创建空目录
 #   - junction 一源五用，文件集中管理
 #   - 凭证输入不回显，使用 SecureString
-#   - 不破坏用户已有 config.json（已存在则保留，仅在 --force-config 时覆盖）
-
-[CmdletBinding()]
-param(
-    [string]$LocalSource = "",
-    [string]$TargetDir   = "",          # 测试用：覆盖默认 ~/.workbuddy/skills/<skill>
-    [switch]$ForceConfig = $false,
-    [switch]$NoHook      = $false,
-    [switch]$Unattended  = $false       # 用环境变量跳过交互
-)
+#   - 不破坏用户已有 config.json（已存在则保留，仅在 WORKLOG_FORCE_CONFIG 时覆盖）
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference   = "SilentlyContinue"  # 关闭 irm 进度条
@@ -38,6 +32,13 @@ $H = if ($env:WORKLOG_TEST_HOME) { $env:WORKLOG_TEST_HOME } else { $HOME }
 # 写入文件用无 BOM UTF-8（Python json.load + 多数 agent 工具不认 BOM）
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $SKILL_NAME   = "mingdao-worklog-api"
+
+# 为了兼容 irm ... | iex，参数统一走环境变量（不能用 param() 块）
+[string]$LocalSource = if ($env:WORKLOG_LOCAL_SOURCE) { $env:WORKLOG_LOCAL_SOURCE } else { "" }
+[string]$TargetDir   = if ($env:WORKLOG_TARGET_DIR)   { $env:WORKLOG_TARGET_DIR }   else { "" }
+[bool]$ForceConfig   = if ($env:WORKLOG_FORCE_CONFIG) { $true } else { $false }
+[bool]$NoHook        = if ($env:WORKLOG_NO_HOOK)      { $true } else { $false }
+[bool]$Unattended    = if ($env:UNATTENDED)            { $true } else { $false }
 $TARGET_DIR   = if ($TargetDir) { $TargetDir } else { Join-Path $H ".workbuddy\skills\$SKILL_NAME" }
 $REPO_URL     = if ($env:REPO_URL)     { $env:REPO_URL }     else { "https://github.com/hemiyang2011-commits/mingdao-worklog-api.git" }
 $BRANCH       = if ($env:BRANCH)       { $env:BRANCH }       else { "main" }
