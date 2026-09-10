@@ -155,10 +155,12 @@ else
     ok "git: $(git --version | head -c 30)"
 fi
 
-# ============== 2. 凭证 ==============
-step 2 "$TOTAL_STEPS" "获取明道云 appKey + secretKey"
+# ============== 2. 凭证 + 默认员工 ==============
+step 2 "$TOTAL_STEPS" "获取明道云凭证 + 默认员工名称"
 APPKEY="${MINGDAO_APPKEY:-}"
 SECRETKEY="${MINGDAO_SECRETKEY:-}"
+DEFAULT_EMPLOYEE="${MINGDAO_DEFAULT_EMPLOYEE:-}"
+
 if [[ "$UNATTENDED" -eq 0 ]]; then
     if [[ -z "$APPKEY" ]]; then
         printf '  在「明道云 → 应用 → 应用授权」获取 appKey + secretKey\n'
@@ -170,12 +172,28 @@ if [[ "$UNATTENDED" -eq 0 ]]; then
         read -rs SECRETKEY
         printf '\n'
     fi
+    # 默认员工：必填（避免写日志时无主）。循环问直到 trim 后非空
+    while [[ -z "$(echo "$DEFAULT_EMPLOYEE" | tr -d '[:space:]')" ]]; do
+        printf '  默认员工名称：不传员工参数时按这个名字写日志（必填，例如你的真实姓名）\n'
+        printf '  默认员工名称（必填，不能直接回车）: '
+        read -r DEFAULT_EMPLOYEE
+        if [[ -n "$(echo "$DEFAULT_EMPLOYEE" | tr -d '[:space:]')" ]]; then
+            DEFAULT_EMPLOYEE="$(echo "$DEFAULT_EMPLOYEE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            break
+        fi
+        printf '  ⚠ 默认员工不能为空，请输入你的真实姓名\n'
+    done
 fi
 if [[ -z "$APPKEY" || -z "$SECRETKEY" ]]; then
     err "缺少 appKey 或 secretKey（可设环境变量 MINGDAO_APPKEY / MINGDAO_SECRETKEY 重试）"
     exit 1
 fi
+if [[ -z "$(echo "$DEFAULT_EMPLOYEE" | tr -d '[:space:]')" ]]; then
+    err "缺少默认员工（可设环境变量 MINGDAO_DEFAULT_EMPLOYEE 重试）"
+    exit 1
+fi
 ok "appKey / secretKey 已接收（不回显）"
+ok "默认员工：$DEFAULT_EMPLOYEE"
 
 # ============== 3. 拉取源文件 ==============
 step 3 "$TOTAL_STEPS" "拉取 skill 源文件"

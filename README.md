@@ -106,7 +106,7 @@ $env:MINGDAO_SECRETKEY="yyy"
 irm .../install.ps1 | iex
 ```
 
-> 想设默认员工时再加 `MINGDAO_DEFAULT_EMPLOYEE=杨浪`（bash）或 `$env:MINGDAO_DEFAULT_EMPLOYEE="杨浪"`（PS）。
+> 跳过交互时设 `MINGDAO_DEFAULT_EMPLOYEE=<你的真实姓名>`（bash）/ `$env:MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>"`（PS）。
 
 ---
 
@@ -115,7 +115,7 @@ irm .../install.ps1 | iex
 | 步骤 | 行为 |
 |---|---|
 | 1 | 检测 `python3` 是否安装（git 可选，缺失时走 zipball/tarball 下载） |
-| 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（如 杨浪，可回车跳过） |
+| 2 | 询问 / 接收 appKey + secretKey（不回显）+ 默认员工名称（**必填**，从环境变量或交互输入） |
 | 3 | git clone 到 `~/.workbuddy/skills/mingdao-worklog-api/`（已存在则 pull） |
 | 4 | 写入 `config.json`（从 example + 凭证 + 默认员工） |
 | 5 | 在 6 个 agent 工具目录建 junction / symlink（探测式，仅对存在的工具生效） |
@@ -132,14 +132,14 @@ irm .../install.ps1 | iex
 REPO_URL=https://github.com/hemiyang2011-commits/mingdao-worklog-api.git \
 MINGDAO_APPKEY=xxx \
 MINGDAO_SECRETKEY=yyy \
-MINGDAO_DEFAULT_EMPLOYEE=杨浪 \
+MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>" \
     curl -fsSL .../install.sh | bash
 
 # PowerShell
 $env:REPO_URL="https://github.com/hemiyang2011-commits/mingdao-worklog-api.git"
 $env:MINGDAO_APPKEY="xxx"
 $env:MINGDAO_SECRETKEY="yyy"
-$env:MINGDAO_DEFAULT_EMPLOYEE="杨浪"
+$env:MINGDAO_DEFAULT_EMPLOYEE="<你的真实姓名>"
 irm .../install.ps1 | iex
 ```
 
@@ -267,7 +267,7 @@ Antigravity CLI（`agy`）的话会把它转成 slash command `/mingdao-worklog-
 
 agent 自动：
 1. 项目按"资产OA 系统"模糊匹配
-2. 员工走 config 默认（如杨浪）
+2. 员工走 config 默认（install 时必填）
 3. owner 自动从员工档案取 = 你自己的 HAP accountId
 4. 时段默认"全天"
 5. 调 `add-row` → 拿回新 rowid → 报给你
@@ -288,7 +288,7 @@ python ~/.workbuddy/skills/mingdao-worklog-api/scripts/worklog_api.py \
 
 ```bash
 python ... add-row \
-    --employee-name "杨浪" \
+    --employee-name "<被替写的员工姓名>" \
     --project-name "三农二期" \
     --content "..." --hours 3
 ```

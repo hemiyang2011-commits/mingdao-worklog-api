@@ -177,13 +177,20 @@ if (-not $Unattended -and (-not $appKey -or -not $secretKey)) {
 if (-not $appKey -or -not $secretKey) { Write-Err "缺少 appKey 或 secretKey"; exit 1 }
 Write-OK "appKey/secretKey 已接收（不回显）"
 
-# 默认员工：环境变量优先；交互时给个示例默认（按回车就用），避免空字符串走模糊匹配
+# 默认员工：必填（避免写日志时无主）。环境变量优先；交互时循环问直到 trim 后非空
 if (-not $defaultEmployee -and -not $Unattended) {
-    Write-Host "  默认员工名称：不传员工参数时按这个名字写日志（用真实姓名如 杨浪；留空则每次必填）"
-    $input = Read-Host "  默认员工名称（直接回车 = 不设默认）"
-    if ($input) { $defaultEmployee = $input }
+    while (-not ($defaultEmployee -and $defaultEmployee.Trim())) {
+        Write-Host "  默认员工名称：不传员工参数时按这个名字写日志（必填，例如你的真实姓名）"
+        $input = Read-Host "  默认员工名称（必填，不能直接回车）"
+        if ($input -and $input.Trim()) {
+            $defaultEmployee = $input.Trim()
+        } else {
+            Write-Warn "  默认员工不能为空，请输入你的真实姓名"
+        }
+    }
 }
-if ($defaultEmployee) { Write-OK "默认员工：$defaultEmployee" }
+if (-not ($defaultEmployee -and $defaultEmployee.Trim())) { Write-Err "缺少默认员工（可设环境变量 MINGDAO_DEFAULT_EMPLOYEE 重试）"; exit 1 }
+Write-OK "默认员工：$defaultEmployee"
 
 # ============== 3. 拉取源文件 ==============
 $stepIdx++
