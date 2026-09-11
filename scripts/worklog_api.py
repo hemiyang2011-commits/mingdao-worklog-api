@@ -28,6 +28,12 @@ SHA256 再 base64。应用密钥的 sign 就是那个值本身。）
     list-projects  拉取「项目档案」表（rowid + 名称），供模糊匹配
     list-employees 拉取「员工档案」表（rowid + 姓名），供模糊匹配
     add-row        向工作日志表新增一条记录（员工、项目均为必填）
+    delete-row     从工作日志表删除一条记录（撤回误写/清理测试数据）
+
+项目经理自动带出：
+    add-row 解析出项目后会反查项目档案，把「项目经理」关联记录（sid=员工 rowid）
+    填入工作日志的「项目经理」字段，「项目经理（内部）」成员的 accountId 填入
+    「项目经理用户」字段。项目没配置经理则跳过；--no-pm 可单次关闭。
 
 用法示例：
     python worklog_api.py --config config.json test-auth
@@ -334,6 +340,35 @@ def _lookup_employee_hap_account(cfg: dict[str, Any], employee_rowid: str) -> st
     return ""
 
 
+def _lookup_project_pms(cfg: dict[str, Any], project_rowid: str) -> tuple[list[str], list[str]]:
+    """反查项目档案，取项目经理。
+
+    返回 (pm_rowids, pm_accountids)：
+        - pm_rowids     「项目经理」关联字段里每项的 sid（= 员工档案 rowid），
+                        用于填工作日志的「项目经理」（关联，单条取第一个）
+        - pm_accountids 「项目经理（内部）」成员字段里每项的 accountId，
+                        用于填工作日志的「项目经理用户」（成员，值=accountId 数组）
+    任一环节失败/未配置都返回空列表，不阻断写日志。
+    """
+    pm_field = cfg.get("project_pm_control_id", "")
+    pm_internal_field = cfg.get("project_pm_internal_control_id", "")
+    ws = cfg.get("project_worksheet_id", "")
+    if (not pm_field and not pm_internal_field) or not ws or not project_rowid:
+        return [], []
+    url = f"{_api_base(cfg)}/v3/app/worksheets/{ws}/rows/{project_rowid}"
+    req = urllib.request.Request(url, headers={"HAP-Appkey": cfg["appKey"], "HAP-Sign": cfg["secretKey"]})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode()).get("data", {})
+    except (urllib.error.HTTPError, json.JSONDecodeError, KeyError):
+        return [], []
+    pm_rowids = [it.get("sid") for it in (data.get(pm_field) or [])
+                 if isinstance(it, dict) and it.get("sid")] if pm_field else []
+    pm_accountids = [it.get("accountId") for it in (data.get(pm_internal_field) or [])
+                     if isinstance(it, dict) and it.get("accountId")] if pm_internal_field else []
+    return pm_rowids, pm_accountids
+
+
 def cmd_add_row(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     fields = cfg["fields"]
@@ -371,6 +406,26 @@ def cmd_add_row(args: argparse.Namespace) -> int:
     if owner_id:
         controls.append({"controlId": "ownerid", "value": owner_id})
 
+    # 项目经理（自动带出）：按项目 rowid 反查项目档案，填「项目经理」+「项目经理用户」。
+    # 项目未配置经理/接口失败时静默跳过，不阻断写日志。--no-pm 可单次关闭。
+    pm_note = ""
+    pm_rowids: list[str] = []
+    pm_accounts: list[str] = []
+    if not args.no_pm:
+        pm_control = cfg.get("worklog_pm_control_id", "")
+        pm_user_control = cfg.get("worklog_pm_user_control_id", "")
+        if pm_control or pm_user_control:
+            pm_rowids, pm_accounts = _lookup_project_pms(cfg, project_rowid)
+            if pm_control and pm_rowids:
+                # 关联字段（单条）：value = rowid 字符串
+                controls.append({"controlId": pm_control, "value": pm_rowids[0]})
+            if pm_user_control and pm_accounts:
+                # 成员字段：实测本部署 addRow 的成员控件只接受单个 accountId 字符串，
+                # 数组会报 10001 JSON 解析错误；多经理项目取第一个
+                controls.append({"controlId": pm_user_control, "value": pm_accounts[0]})
+            if not pm_rowids and not pm_accounts:
+                pm_note = "（项目未配置项目经理，未带出该字段）"
+
     url = f"{_api_base(cfg)}/v2/open/worksheet/addRow"
     payload = _auth_body(cfg, cfg["worklog_worksheet_id"], controls=controls,
                          triggerWorkflow=not args.no_workflow)
@@ -382,6 +437,9 @@ def cmd_add_row(args: argparse.Namespace) -> int:
             "_employee_source": employee_source,
             "_project_source": project_source,
             "_owner_source": owner_source,
+            "_pm_rowids": pm_rowids,
+            "_pm_accountids": pm_accounts,
+            "_pm_note": pm_note,
         }, ensure_ascii=False, indent=2))
         return 0
 
@@ -394,10 +452,33 @@ def cmd_add_row(args: argparse.Namespace) -> int:
     print(json.dumps(resp, ensure_ascii=False, indent=2))
     if ok:
         owner_hint = f"，owner 来自{owner_source}={owner_id}" if owner_id else "（未设置 ownerid）"
+        pm_hint = f" | 项目经理={'/'.join(pm_rowids) or pm_note or '无'}" if not args.no_pm else " | 项目经理=未启用"
         print(f"\n✓ 写入成功 rowid={resp.get('data')}", file=sys.stderr)
-        print(f"  员工={employee_source} | 项目={project_source}{owner_hint}", file=sys.stderr)
+        print(f"  员工={employee_source} | 项目={project_source}{pm_hint}{owner_hint}", file=sys.stderr)
     else:
         print(f"\n✗ 写入失败（见上方响应）", file=sys.stderr)
+    return 0 if ok else 1
+
+
+def cmd_delete_row(args: argparse.Namespace) -> int:
+    """删除工作日志行（按 rowid），用于撤回误写/清理测试数据。
+
+    端点为 /v2/open/worksheet/deleteRow（单数，见 references/api_reference.md）。
+    需要在「应用→授权管理」里给该授权开通删除权限，否则报 10005 数据操作无权限。
+    """
+    cfg = load_config(args.config)
+    url = f"{_api_base(cfg)}/v2/open/worksheet/deleteRow"
+    payload = _auth_body(cfg, cfg["worklog_worksheet_id"],
+                         rowId=args.rowid, deleteType=args.delete_type)
+    resp = _post(url, payload)
+    if resp.get("_http"):
+        print(json.dumps(resp, ensure_ascii=False, indent=2))
+        return 1
+    ok = bool(resp.get("success"))
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+    hint = "" if ok else "（也可能是该应用授权未开通删除权限：明道云→应用→授权管理→勾选删除）"
+    print(f"\n{'✓ 已删除' if ok else '✗ 删除失败'} rowid={args.rowid}{hint}",
+          file=sys.stderr)
     return 0 if ok else 1
 
 
@@ -426,8 +507,13 @@ def main(argv: list[str] | None = None) -> int:
     p_add.add_argument("--hours", type=float, default=None, help="工时（数字）")
     p_add.add_argument("--shift", default=None, help="时段：全天/上午/下午/其它")
     p_add.add_argument("--owner-account-id", default=None, help="拥有者（HAP accountId）。不传则取 config.json 的 default_owner_account_id；都没有则按员工档案自动查")
+    p_add.add_argument("--no-pm", action="store_true", help="不自动带出项目经理（默认按项目档案自动带出）")
     p_add.add_argument("--no-workflow", action="store_true", help="不触发工作流")
     p_add.add_argument("--dry-run", action="store_true", help="只打印请求体，不发送")
+
+    p_del = sub.add_parser("delete-row", help="从工作日志表删除一条记录（撤回误写/清理测试数据）")
+    p_del.add_argument("rowid", help="要删除的行 rowid（add-row 成功时输出的 data）")
+    p_del.add_argument("--delete-type", type=int, default=2, help="2=直接删除（默认），1=移入回收站")
 
     args = parser.parse_args(argv)
 
@@ -437,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         "list-projects": cmd_list_projects,
         "list-employees": cmd_list_employees,
         "add-row": cmd_add_row,
+        "delete-row": cmd_delete_row,
     }
     return handlers[args.command](args)
 

@@ -201,7 +201,11 @@ def log(msg: str) -> None:
 
 
 def main() -> int:
-    editmsg_path = os.environ.get("COMMIT_EDITMSG", "")
+    # commit-msg 钩子的标准约定是 argv[1] = 消息文件路径；git 并不会把
+    # COMMIT_EDITMSG 导出为环境变量（仅部分流程可用），只读它会静默空转。
+    editmsg_path = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not editmsg_path:
+        editmsg_path = os.environ.get("COMMIT_EDITMSG", "")
     if not editmsg_path or not Path(editmsg_path).is_file():
         # not invoked by git, ignore
         return 0

@@ -136,7 +136,7 @@ Content-Type: application/json
 | 多选 MultipleSelect | `["<key1>", "<key2>"]`（数组） |
 | 关联 Relation（单条） | `"<rowid>"`（**字符串**） |
 | 关联 Relation（多条） | `["<rowid1>", "<rowid2>"]`（数组） |
-| 成员 Collaborator | `["<accountId>"]` |
+| 成员 Collaborator | `["<accountId>"]`（⚠️ 2026-09-10 实测：本部署 api.mingdao.com 的 addRow 成员控件**只接受单个 accountId 字符串**，传数组报 `10001` JSON 解析错误；写「项目经理用户」时按字符串传） |
 | 系统字段 `ownerid` | `"<HAP accountId>"`（**字符串**，不是数组） |
 | 系统字段 `caid` | 不能直接写，但**写入 ownerid 时会自动同步**；未传 ownerid 时 = `user-api` |
 | 系统字段 `uaid` | 不能写，addRow 后被工作流触发则 = `user-workflow` |
@@ -145,6 +145,14 @@ Content-Type: application/json
 
 ## 7. 踩坑记录（实测）
 
+- **getFilterRows 的关联字段返回格式不稳定**：同一个视图，有时返回**已解析的数组**
+  （`[{sid, name, link, sourcevalue}, ...]`），有时返回**JSON 字符串**
+  （`"[{...}]"`）。读取时必须先判断类型，字符串要再 `json.loads` 一次。
+- **updateRow / deleteRows 端点 405**：本部署 V2 开放接口只有 `deleteRow`（单数），
+  `updateRow` 不可用——写错字段无法 API 修改，只能明道云界面手工改或删除重写。
+- **偶发：员工字段被工作流污染**（2026-09-10，4 次同参全量写入出现 1 次）：
+  addRow 后「员工」被改成「项目经理」的值（表上挂的明道云自动化疑似在行创建瞬间
+  抢跑）。同请求体重试即正常，非脚本问题；遇到时重写一行并在界面修/删坏行。
 - **sign 直接 = SecretKey 值**，不要再做 SHA256+base64。做了反而 401「Http Headers verification failed」。
 - `controls` 必须是数组，元素键名是 `controlId`（不是 `id`、不是 `fieldId`）。
 - 单条关联字段写 **rowid 字符串**（不是数组，传数组会 JSON 解析报错）。

@@ -64,6 +64,31 @@ function Test-Git {
     return $false
 }
 
+# Windows 上普遍只有 `python` 命令而没有 `python3`，而 commit-msg hook 的
+# shebang 是 `#!/usr/bin/env python3` —— 缺这个命令会让钩子起不来，导致
+# 所有 git commit 被中止（实测复现）。这里在 ~\bin 下建一个指向真实
+# python 的垫片（sh 脚本，供 Git for Windows 的 sh 解析），并确保其在用户 PATH。
+function Ensure-Python3Shim {
+    if ($env:OS -ne "Windows_NT") { return }
+    $hasPy3 = $false
+    try { & python3 --version 2>&1 | Out-Null; $hasPy3 = ($LASTEXITCODE -eq 0) } catch {}
+    if ($hasPy3) { return }
+    $realPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $realPy) { return }   # 只有 uv 兜底的场景装不了 sh 垫片，交给 README 排错
+    $binDir = Join-Path $HOME "bin"
+    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    # 转成 Git Bash 风格路径：C:\...\python.exe → /c/.../python.exe
+    $fwd = $realPy -replace '\\', '/'
+    $shimTarget = if ($fwd -match '^([A-Za-z]):/(.*)$') { "/" + $Matches[1].ToLower() + "/" + $Matches[2] } else { $fwd }
+    $shim = Join-Path $binDir "python3"
+    Set-Content -Path $shim -Value "#!/bin/sh`nexec `"$shimTarget`" `"`$@`"" -Encoding ASCII
+    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath -and ($userPath -split ';') -notcontains $binDir) {
+        [System.Environment]::SetEnvironmentVariable("PATH", "$binDir;$userPath", "User")
+    }
+    Write-OK "已创建 python3 垫片：$shim（commit-msg hook 依赖 python3 命令）"
+}
+
 # 自动装 Python（或 uv）。所有步骤都无管理员权限、用户态安装。
 # 优先级：winget > uv（Astral，单 exe ~13MB）> 引导到 python.org
 function Install-Python {
@@ -156,6 +181,7 @@ if (-not $python) {
 }
 if (-not $python) { exit 1 }
 Write-OK "Python: $python"
+Ensure-Python3Shim
 if (-not (Test-Git)) {
     Write-Warn "未检测到 git。若 LocalSource 为空且目标目录不存在会失败。可安装 git for windows 或用 -LocalSource。"
 } else {
@@ -277,6 +303,8 @@ if ((Test-Path $configPath) -and -not $ForceConfig) {
     $cfgJson = Get-Content $examplePath -Raw -Encoding UTF8 | ConvertFrom-Json
     $cfgJson.appKey    = $appKey
     $cfgJson.secretKey = $secretKey
+    # 与 install.sh 对齐：把默认员工名称写进 config（漏写会导致写日志时无主）
+    if ($defaultEmployee -and $defaultEmployee.Trim()) { $cfgJson.default_employee_name = $defaultEmployee.Trim() }
     # 写入用 utf8 without BOM（Python json.load 不认 BOM；PowerShell Set-Content -Encoding UTF8 默认加 BOM）
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $jsonText = $cfgJson | ConvertTo-Json -Depth 10

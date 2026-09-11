@@ -133,6 +133,9 @@ python "<skill_dir>/scripts/worklog_api.py" --config "<skill_dir>/config.json" a
 - 时段传中文即可，脚本内部映射到 key。
 - 想先看请求体不发请求，加 `--dry-run`。
 - 员工/项目任一未传：脚本内部自动走 config 默认值（按名模糊匹配）。
+- **项目经理自动带出**：解析出项目后，脚本反查项目档案把「项目经理」填入日志的
+  「项目经理」（关联）和「项目经理用户」（成员）字段，无需传参。项目没配经理则
+  跳过；`--no-pm` 可单次关闭。成员控件 value 是**单个 accountId 字符串**（数组会报 10001）。
 
 ### Step 4. 读回校验
 
@@ -145,7 +148,8 @@ python "<skill_dir>/scripts/worklog_api.py" --config "<skill_dir>/config.json" a
 
 ### scripts/worklog_api.py
 核心脚本。子命令：`sign`（打印 appKey/sign）、`test-auth`（验证鉴权）、`list-projects`、
-`list-employees`、`add-row`（写日志）。纯标准库，直接 `python` 跑，不装依赖。
+`list-employees`、`add-row`（写日志，自动带出项目经理）、`delete-row`（删日志行；
+需在「应用→授权管理」开通删除权限，否则 10005）。纯标准库，直接 `python` 跑，不装依赖。
 
 ### scripts/match_project.py
 名称模糊匹配（纯标准库，员工、项目通用），输出 JSON 数组到 stdout。
